@@ -1,6 +1,20 @@
 package tech.whitewolf.app
 
-import android.app.Activity
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import tech.whitewolf.app.ui.ShellScreen
 
-// Placeholder; replaced in Task 9 by the Compose shell.
-class MainActivity : Activity()
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val container = AppContainer(this)
+        setContent {
+            MaterialTheme {
+                Surface { ShellScreen(container) }
+            }
+        }
+    }
+}
