@@ -1,7 +1,7 @@
 # Releasing the WWT app & installing via Obtainium
 
 The app is distributed as a **signed APK attached to a GitHub Release**, built
-automatically by `.github/workflows/release.yml` when you push a `v*` tag. Obtainium
+automatically by `.github/workflows/release.yml` when you push a `v*.*.*` tag. Obtainium
 installs and auto-updates from those releases.
 
 ## One-time: create the release keystore

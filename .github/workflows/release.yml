@@ -34,6 +34,10 @@ jobs:
         id: ver
         run: |
           TAG="${GITHUB_REF_NAME#v}"
+          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' must be vN.N.N (integers only)." >&2
+            exit 1
+          fi
           IFS='.' read -r MAJ MIN PAT <<< "$TAG"
           CODE=$(( MAJ * 10000 + MIN * 100 + PAT ))
           echo "name=$TAG" >> "$GITHUB_OUTPUT"
@@ -42,15 +46,20 @@ jobs:
       - name: Unit tests (gate)
         run: ./gradlew :app:testDebugUnitTest
 
-      - name: Decode release keystore
+      - name: Validate secrets & decode keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::RELEASE_KEYSTORE_BASE64 secret is not set — cannot sign release." >&2
-            exit 1
-          fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          for VAR in RELEASE_KEYSTORE_BASE64 RELEASE_KEYSTORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+            if [ -z "${!VAR}" ]; then
+              echo "::error::$VAR secret is not set — cannot sign release." >&2
+              exit 1
+            fi
+          done
+          echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
 
       - name: Build signed release APK
         env:
