@@ -5,6 +5,15 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Release version comes from -PversionName / -PversionCode (set by CI from the git
+// tag); falls back to the dev defaults for local/debug builds.
+val appVersionName: String = (findProperty("versionName") as String?) ?: "0.1.0"
+val appVersionCode: Int = (findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+
+// Release signing is configured only when CI provides a keystore via env; absent it,
+// release builds are unsigned and debug/tests are unaffected.
+val releaseKeystorePath: String? = System.getenv("RELEASE_KEYSTORE_PATH")
+
 android {
     namespace = "tech.whitewolf.app"
     compileSdk = 35
@@ -13,9 +22,20 @@ android {
         applicationId = "tech.whitewolf.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    if (releaseKeystorePath != null && file(releaseKeystorePath).exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +45,9 @@ android {
         release {
             isMinifyEnabled = false
             buildConfigField("String", "MAIL_BASE_URL", "\"https://mail.whitewolf.tech\"")
+            if (releaseKeystorePath != null && file(releaseKeystorePath).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     buildFeatures { compose = true; buildConfig = true }

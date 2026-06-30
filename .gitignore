@@ -9,3 +9,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Signing keystores — never commit
+*.jks
+*.keystore
+
+# SDD scratch (ledger/reports) — never commit
+.superpowers/
