@@ -97,4 +97,12 @@ class AuthRepositoryTest {
         assertNull(store.token())
         assertTrue(cookies.cleared)
     }
+
+    @Test fun nonJsonBodyReturnsError() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>not json</html>"))
+        val store = freshStore()
+        val result = repo(store, FakeCookies()).login("a@x.tech", "pw")
+        assertTrue(result is LoginResult.Error)
+        assertNull(store.token())
+    }
 }

@@ -45,13 +45,17 @@ class AuthRepository(
                     resp.code == 401 -> LoginResult.InvalidCredentials
                     !resp.isSuccessful -> LoginResult.Error("server returned ${resp.code}")
                     else -> {
-                        val parsed = json.decodeFromString(LoginResp.serializer(), bodyStr)
-                        if (!parsed.ok || parsed.token.isBlank()) {
+                        try {
+                            val parsed = json.decodeFromString(LoginResp.serializer(), bodyStr)
+                            if (!parsed.ok || parsed.token.isBlank()) {
+                                LoginResult.Error("malformed login response")
+                            } else {
+                                tokenStore.save(parsed.token, parsed.expires)
+                                sessionCookieFrom(resp.headers("Set-Cookie"))?.let { cookies.seed(baseUrl, it) }
+                                LoginResult.Success
+                            }
+                        } catch (e: kotlinx.serialization.SerializationException) {
                             LoginResult.Error("malformed login response")
-                        } else {
-                            tokenStore.save(parsed.token, parsed.expires)
-                            sessionCookieFrom(resp.headers("Set-Cookie"))?.let { cookies.seed(baseUrl, it) }
-                            LoginResult.Success
                         }
                     }
                 }
