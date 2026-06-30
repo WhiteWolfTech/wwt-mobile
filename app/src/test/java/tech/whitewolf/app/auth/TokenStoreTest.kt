@@ -41,4 +41,11 @@ class TokenStoreTest {
         assertNull(ts.token())
         assertNull(ts.expiresAt())
     }
+
+    @Test fun returnsNullWhenNowEqualsExpiry() {
+        val s = FakeSecureStore()
+        val ts = TokenStore(s, nowSeconds = { 3000L })
+        ts.save("t", expiresUnix = 3000L)
+        assertNull(ts.token())
+    }
 }
