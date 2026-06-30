@@ -58,15 +58,20 @@ jobs:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease -PversionName=${{ steps.ver.outputs.name }} -PversionCode=${{ steps.ver.outputs.code }}
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
+          VERSION_CODE: ${{ steps.ver.outputs.code }}
+        run: ./gradlew :app:assembleRelease -PversionName="$VERSION_NAME" -PversionCode="$VERSION_CODE"
 
       - name: Stage APK
-        run: cp app/build/outputs/apk/release/app-release.apk "wwt-${{ steps.ver.outputs.name }}.apk"
+        env:
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
+        run: cp app/build/outputs/apk/release/app-release.apk "wwt-$VERSION_NAME.apk"
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "wwt-${{ steps.ver.outputs.name }}.apk" \
-            --title "WWT ${{ steps.ver.outputs.name }}" \
-            --notes "Automated release of White Wolf Technology app ${{ steps.ver.outputs.name }}. Install/update via Obtainium (see docs/OBTAINIUM.md)."
+          gh release create "$GITHUB_REF_NAME" "wwt-$VERSION_NAME.apk" \
+            --title "WWT $VERSION_NAME" \
+            --notes "Automated release of White Wolf Technology app $VERSION_NAME. Install/update via Obtainium (see docs/OBTAINIUM.md)."
