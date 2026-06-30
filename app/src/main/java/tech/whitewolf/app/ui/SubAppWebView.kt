@@ -39,7 +39,11 @@ fun SubAppWebView(subApp: SubApp, onPageError: () -> Unit, onPageLoaded: () -> U
                     return if (NavPolicy.isInApp(url, subApp.host)) {
                         false // let the WebView load it
                     } else {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            android.util.Log.w("SubAppWebView", "No app to open external link: $url")
+                        }
                         true // handled externally
                     }
                 }

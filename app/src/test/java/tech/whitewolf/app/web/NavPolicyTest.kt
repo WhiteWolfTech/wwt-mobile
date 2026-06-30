@@ -23,4 +23,14 @@ class NavPolicyTest {
         assertFalse(NavPolicy.isInApp("http://mail.whitewolf.tech/x", host))
         assertFalse(NavPolicy.isInApp("mailto:a@b.com", host))
     }
+    @Test fun userinfoBypassIsExternal() {
+        // https://<allowed>@evil.com/ — userinfo must not be mistaken for the host
+        assertFalse(NavPolicy.isInApp("https://mail.whitewolf.tech@evil.com/", host))
+    }
+    @Test fun uppercaseHostIsInApp() {
+        assertTrue(NavPolicy.isInApp("https://MAIL.WHITEWOLF.TECH/inbox", host))
+    }
+    @Test fun trailingDotHostIsInApp() {
+        assertTrue(NavPolicy.isInApp("https://mail.whitewolf.tech./inbox", host))
+    }
 }
