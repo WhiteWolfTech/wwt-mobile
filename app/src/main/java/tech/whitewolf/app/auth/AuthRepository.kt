@@ -34,21 +34,19 @@ class AuthRepository(
         val req = Request.Builder().url("$baseUrl/api/login").post(body).build()
         return try {
             http.newCall(req).execute().use { resp ->
+                val bodyStr = resp.body?.string().orEmpty() // drain so the connection can be reused
                 when {
                     resp.code == 401 -> LoginResult.InvalidCredentials
                     !resp.isSuccessful -> LoginResult.Error("server returned ${resp.code}")
                     else -> {
-                        val parsed = json.decodeFromString(
-                            LoginResp.serializer(), resp.body?.string().orEmpty()
-                        )
+                        val parsed = json.decodeFromString(LoginResp.serializer(), bodyStr)
                         if (!parsed.ok || parsed.token.isBlank()) {
-                            return LoginResult.Error("malformed login response")
+                            LoginResult.Error("malformed login response")
+                        } else {
+                            tokenStore.save(parsed.token, parsed.expires)
+                            sessionCookieFrom(resp.headers("Set-Cookie"))?.let { cookies.seed(baseUrl, it) }
+                            LoginResult.Success
                         }
-                        tokenStore.save(parsed.token, parsed.expires)
-                        sessionCookieFrom(resp.headers("Set-Cookie"))?.let {
-                            cookies.seed(baseUrl, it)
-                        }
-                        LoginResult.Success
                     }
                 }
             }

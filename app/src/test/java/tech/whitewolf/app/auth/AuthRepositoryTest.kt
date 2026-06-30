@@ -49,10 +49,14 @@ class AuthRepositoryTest {
         assertEquals(9999L, store.expiresAt())
         assertTrue(cookies.seededHeader!!.startsWith("session=u.9999.sig"))
 
+        assertEquals(server.url("/").toString().trimEnd('/'), cookies.seededUrl)
+
         val sent = server.takeRequest()
         assertEquals("POST", sent.method)
         assertEquals("/api/login", sent.path)
-        assertTrue(sent.body.readUtf8().contains("\"email\":\"a@x.tech\""))
+        val body = sent.body.readUtf8()
+        assertTrue(body.contains("\"email\":\"a@x.tech\""))
+        assertTrue(body.contains("\"password\":\"pw\""))
     }
 
     @Test fun unauthorizedReturnsInvalidCredentialsAndStoresNothing() {
@@ -69,6 +73,20 @@ class AuthRepositoryTest {
         server.enqueue(MockResponse().setResponseCode(500))
         val result = repo(freshStore(), FakeCookies()).login("a@x.tech", "pw")
         assertTrue(result is LoginResult.Error)
+    }
+
+    @Test fun okFalseReturnsError() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":false,"token":"","expires":0}"""))
+        val result = repo(freshStore(), FakeCookies()).login("a@x.tech", "pw")
+        assertTrue(result is LoginResult.Error)
+    }
+
+    @Test fun blankTokenReturnsError() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true,"token":"  ","expires":9999}"""))
+        val store = freshStore()
+        val result = repo(store, FakeCookies()).login("a@x.tech", "pw")
+        assertTrue(result is LoginResult.Error)
+        assertNull(store.token())
     }
 
     @Test fun logoutClearsTokenAndCookies() {
