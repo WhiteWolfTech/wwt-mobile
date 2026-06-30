@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Application ID **`tech.whitewolf.app`**; display name **"WWT"**. (spec §5) Never brand the app "Mail"; mail is sub-app #1.
-- `minSdk 29`, `targetSdk 36`, `compileSdk 36`. Kotlin + Jetpack Compose. (spec §5)
+- `minSdk 29`, `targetSdk 35`, `compileSdk 35`. Kotlin + Jetpack Compose. (spec §5 said "latest stable (36)"; pinned to 35 to match the verified, mutually-compatible toolchain AGP 8.6.1 + Kotlin 2.0.20 + Compose BOM 2024.09 — bump together later.)
 - Mail sub-app URL = `BuildConfig.MAIL_BASE_URL`; release value **`https://mail.whitewolf.tech`**, debug overridable. Each sub-app's host derives from its own URL. (spec §5)
 - Permissions: **`INTERNET` only** this sub-project. No `POST_NOTIFICATIONS`, no other permission. (spec §5, §8 foundation)
 - Backend HTTP contract (already shipped, PR #24): `POST /api/login` with `{"email","password"}` → on success `200` `{"ok":true,"token":"<userID.exp.sig>","expires":<unixSeconds>}` and a `Set-Cookie: session=…` header; `401` on bad credentials. Token + cookie share a 7-day lifetime. (spec §3)
@@ -52,8 +52,16 @@ Tests mirror under `app/src/test/...` (JVM) and `app/src/androidTest/...` (instr
 ### Task 1: Gradle scaffold + app module + manifest
 
 **Files:**
-- Create: `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `app/build.gradle.kts`, `app/src/main/AndroidManifest.xml`, `app/src/main/java/tech/whitewolf/app/Placeholder.kt`, `app/src/test/java/tech/whitewolf/app/ScaffoldTest.kt`, `.gitignore`
+- Create: `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `gradle/libs.versions.toml`, `app/build.gradle.kts`, `app/src/main/AndroidManifest.xml`, `app/src/main/java/tech/whitewolf/app/MainActivity.kt` (placeholder), `app/src/test/java/tech/whitewolf/app/ScaffoldTest.kt`, `.gitignore`
 - Also: Gradle wrapper files (`gradlew`, `gradlew.bat`, `gradle/wrapper/*`).
+- **`gradle.properties` is required** and must contain `android.useAndroidX=true` (the build fails `checkDebugAarMetadata` without it), plus `android.nonTransitiveRClass=true` and a JVM heap setting:
+  ```properties
+  android.useAndroidX=true
+  android.nonTransitiveRClass=true
+  org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+  org.gradle.caching=true
+  kotlin.code.style=official
+  ```
 
 **Interfaces:**
 - Produces: a buildable Compose app module with `BuildConfig.MAIL_BASE_URL`, application id `tech.whitewolf.app`, INTERNET permission. Later tasks add source files under `tech.whitewolf.app.*`.
@@ -148,12 +156,12 @@ plugins {
 
 android {
     namespace = "tech.whitewolf.app"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "tech.whitewolf.app"
         minSdk = 29
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
