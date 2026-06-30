@@ -14,21 +14,27 @@ sealed interface LoginResult {
     data class Error(val message: String) : LoginResult
 }
 
+interface Authenticator {
+    fun login(email: String, password: String): LoginResult
+    fun isLoggedIn(): Boolean
+    fun logout()
+}
+
 class AuthRepository(
     private val http: OkHttpClient,
     private val baseUrl: String,
     private val tokenStore: TokenStore,
     private val cookies: WebCookies,
-) {
+) : Authenticator {
     @Serializable private data class LoginReq(val email: String, val password: String)
     @Serializable private data class LoginResp(val ok: Boolean = false, val token: String = "", val expires: Long = 0)
 
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
-    fun isLoggedIn(): Boolean = tokenStore.token() != null
+    override fun isLoggedIn(): Boolean = tokenStore.token() != null
 
-    fun login(email: String, password: String): LoginResult {
+    override fun login(email: String, password: String): LoginResult {
         val body = json.encodeToString(LoginReq.serializer(), LoginReq(email, password))
             .toRequestBody(jsonMedia)
         val req = Request.Builder().url("$baseUrl/api/login").post(body).build()
@@ -55,7 +61,7 @@ class AuthRepository(
         }
     }
 
-    fun logout() {
+    override fun logout() {
         tokenStore.clear()
         cookies.clear(baseUrl)
     }
