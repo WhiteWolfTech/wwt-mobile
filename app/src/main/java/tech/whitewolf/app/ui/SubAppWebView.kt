@@ -3,6 +3,7 @@ package tech.whitewolf.app.ui
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -10,12 +11,18 @@ import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubApp
 import tech.whitewolf.app.web.NavPolicy
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun SubAppWebView(subApp: SubApp, onPageError: () -> Unit, onPageLoaded: () -> Unit) {
+fun SubAppWebView(
+    subApp: SubApp,
+    sessionToken: String?,
+    onPageError: () -> Unit,
+    onPageLoaded: () -> Unit,
+) {
     val context = LocalContext.current
     AndroidView(factory = { ctx ->
         WebView(ctx).apply {
@@ -56,7 +63,21 @@ fun SubAppWebView(subApp: SubApp, onPageError: () -> Unit, onPageLoaded: () -> U
 
                 override fun onPageFinished(view: WebView, url: String) { onPageLoaded() }
             }
-            loadUrl(subApp.url)
+
+            // Seed the session cookie from the stored token NOW (the WebView's cookie
+            // store is live at this point) so the SPA loads already authenticated.
+            // The cookie is committed before loadUrl via the setCookie callback to
+            // avoid a race between seeding and the first request.
+            val cm = CookieManager.getInstance()
+            cm.setAcceptCookie(true)
+            if (sessionToken != null) {
+                cm.setCookie(subApp.url, sessionCookieLine(sessionToken)) {
+                    cm.flush()
+                    loadUrl(subApp.url)
+                }
+            } else {
+                loadUrl(subApp.url)
+            }
         }
     })
 }

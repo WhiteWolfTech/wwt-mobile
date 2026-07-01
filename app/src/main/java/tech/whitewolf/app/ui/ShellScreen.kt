@@ -74,6 +74,7 @@ fun ShellScreen(container: AppContainer) {
                     key(reloadKey) {
                         SubAppWebView(
                             subApp = subApp,
+                            sessionToken = container.auth.currentToken(),
                             onPageError = { errored = true },
                             onPageLoaded = { loading = false },
                         )
