@@ -25,4 +25,12 @@ class SetCookieTest {
         // "sessionx=" must NOT be treated as the session cookie.
         assertNull(sessionCookieFrom(listOf("sessionx=nope; Path=/")))
     }
+
+    @Test fun buildsSessionCookieLineFromToken() {
+        // The WebView is seeded with the stored token as the session cookie value.
+        assertEquals(
+            "session=u.9999.sig; Path=/; Secure; HttpOnly; SameSite=Lax",
+            sessionCookieLine("u.9999.sig"),
+        )
+    }
 }

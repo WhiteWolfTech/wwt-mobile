@@ -34,6 +34,10 @@ class AuthRepository(
 
     override fun isLoggedIn(): Boolean = tokenStore.token() != null
 
+    /** The current (non-expired) bearer token, or null. Used to seed the WebView
+     *  session cookie at load time, since the cookie value IS this token. */
+    fun currentToken(): String? = tokenStore.token()
+
     override fun login(email: String, password: String): LoginResult {
         val body = json.encodeToString(LoginReq.serializer(), LoginReq(email, password))
             .toRequestBody(jsonMedia)
