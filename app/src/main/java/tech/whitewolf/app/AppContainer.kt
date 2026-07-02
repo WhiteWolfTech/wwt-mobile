@@ -20,4 +20,5 @@ class AppContainer(context: Context) {
     }
 
     val auth = AuthRepository(http, baseUrl, tokenStore, cookies)
+    val pushApiClient = tech.whitewolf.app.push.PushApiClient(http, baseUrl) { tokenStore.token() }
 }
