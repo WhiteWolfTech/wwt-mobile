@@ -2,7 +2,6 @@ package tech.whitewolf.app.push
 
 import android.content.Context
 import org.unifiedpush.android.connector.MessagingReceiver
-import tech.whitewolf.app.AppContainer
 
 /**
  * Receives UnifiedPush events. The registration network call runs off the main
@@ -17,7 +16,7 @@ class PushReceiver : MessagingReceiver() {
         val pending = goAsync()
         Thread {
             try {
-                val container = AppContainer(app)
+                val container = tech.whitewolf.app.WwtApp.from(app).container
                 container.pushEndpointStore.save(endpoint)
                 val ok = container.pushApiClient.register(endpoint)
                 if (!ok) android.util.Log.w("PushReceiver", "push endpoint registration failed")

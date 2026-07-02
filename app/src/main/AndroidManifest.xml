@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".WwtApp"
         android:label="WWT"
         android:allowBackup="false"
         android:supportsRtl="true"
