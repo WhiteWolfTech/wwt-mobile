@@ -17,7 +17,9 @@ class PushReceiver : MessagingReceiver() {
         val pending = goAsync()
         Thread {
             try {
-                val ok = AppContainer(app).pushApiClient.register(endpoint)
+                val container = AppContainer(app)
+                container.pushEndpointStore.save(endpoint)
+                val ok = container.pushApiClient.register(endpoint)
                 if (!ok) android.util.Log.w("PushReceiver", "push endpoint registration failed")
             } catch (e: Throwable) {
                 android.util.Log.w("PushReceiver", "push endpoint registration error", e)

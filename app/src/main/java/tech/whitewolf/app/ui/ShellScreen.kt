@@ -54,11 +54,25 @@ fun ShellScreen(container: AppContainer) {
         if (pushManager.hasDistributor()) pushManager.enable() else showPushHint = true
     }
 
+    val signOut = {
+        val endpoint = container.pushEndpointStore.get()
+        pushManager.disable()
+        Thread {
+            // Order matters: unregister uses the live bearer token, so it must run
+            // before logout() clears the token. Not tied to composition, so it
+            // survives the screen leaving composition when loggedIn flips.
+            if (endpoint != null) container.pushApiClient.unregister(endpoint)
+            container.pushEndpointStore.clear()
+            container.auth.logout()
+        }.start()
+        loggedIn = false
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(subApp.title) },
-                actions = { TextButton(onClick = { pushManager.disable(); container.auth.logout(); loggedIn = false }) { Text("Sign out") } },
+                actions = { TextButton(onClick = signOut) { Text("Sign out") } },
             )
         }
     ) { padding ->
@@ -75,7 +89,7 @@ fun ShellScreen(container: AppContainer) {
                         modifier = Modifier.padding(top = 12.dp).testTag("retry"),
                     ) { Text("Retry") }
                     Button(
-                        onClick = { pushManager.disable(); container.auth.logout(); loggedIn = false },
+                        onClick = signOut,
                         modifier = Modifier.padding(top = 8.dp).testTag("signout"),
                     ) { Text("Sign out") }
                 }
