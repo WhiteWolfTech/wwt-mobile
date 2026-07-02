@@ -12,7 +12,7 @@ import tech.whitewolf.app.ui.ShellScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val container = AppContainer(this)
+        val container = WwtApp.from(this).container
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
                 .launch(android.Manifest.permission.POST_NOTIFICATIONS)
