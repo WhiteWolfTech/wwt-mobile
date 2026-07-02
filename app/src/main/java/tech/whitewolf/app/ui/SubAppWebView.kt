@@ -52,18 +52,22 @@ fun SubAppWebView(
     }
 
     // Background wake: consumed once on the next resume, after the page is ready.
+    // Keyed ONLY on lifecycleOwner — the observer reads pageLoaded/webView live at
+    // event time. It must NOT re-key on pageLoaded: that would dispose+recreate the
+    // effect on the first page load, and the onDispose below would null the WebView.
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, pageLoaded) {
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && pageLoaded && wakeBus.consumePending()) {
                 webView?.evaluateJavascript(WAKE_JS, null)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            webView = null
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Clear the WebView reference only when the composable truly leaves composition.
+    DisposableEffect(Unit) {
+        onDispose { webView = null }
     }
 
     AndroidView(factory = { ctx ->
