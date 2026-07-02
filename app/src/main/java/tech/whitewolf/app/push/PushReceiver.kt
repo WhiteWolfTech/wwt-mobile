@@ -7,8 +7,9 @@ import org.unifiedpush.android.connector.MessagingReceiver
  * Receives UnifiedPush events. The registration network call runs off the main
  * thread on a background Thread, kept alive past the broadcast return by
  * goAsync()/PendingResult.finish() so it can't be killed mid-flight. A new
- * endpoint is sent to the backend; each wake-up posts a generic "New mail"
- * notification.
+ * endpoint is sent to the backend. Each wake-up either refreshes the mailbox
+ * silently (app foregrounded → WakeBus tick) or posts a generic "New mail"
+ * notification and a pending wake (app backgrounded).
  */
 class PushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
