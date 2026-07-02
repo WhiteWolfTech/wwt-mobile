@@ -5,9 +5,11 @@ import org.unifiedpush.android.connector.MessagingReceiver
 import tech.whitewolf.app.AppContainer
 
 /**
- * Receives UnifiedPush events. Network calls run off the main thread via a
- * background Thread so the broadcast isn't blocked. A new endpoint is sent to the
- * backend; each wake-up posts a generic "New mail" notification.
+ * Receives UnifiedPush events. The registration network call runs off the main
+ * thread on a background Thread, kept alive past the broadcast return by
+ * goAsync()/PendingResult.finish() so it can't be killed mid-flight. A new
+ * endpoint is sent to the backend; each wake-up posts a generic "New mail"
+ * notification.
  */
 class PushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
