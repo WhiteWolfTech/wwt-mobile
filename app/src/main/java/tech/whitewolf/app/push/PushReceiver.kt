@@ -12,7 +12,17 @@ import tech.whitewolf.app.AppContainer
 class PushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
         val app = context.applicationContext
-        runOffMain { AppContainer(app).pushApiClient.register(endpoint) }
+        val pending = goAsync()
+        Thread {
+            try {
+                val ok = AppContainer(app).pushApiClient.register(endpoint)
+                if (!ok) android.util.Log.w("PushReceiver", "push endpoint registration failed")
+            } catch (e: Throwable) {
+                android.util.Log.w("PushReceiver", "push endpoint registration error", e)
+            } finally {
+                pending.finish()
+            }
+        }.start()
     }
 
     override fun onMessage(context: Context, message: ByteArray, instance: String) {
@@ -25,9 +35,5 @@ class PushReceiver : MessagingReceiver() {
 
     override fun onRegistrationFailed(context: Context, instance: String) {
         android.util.Log.w("PushReceiver", "UnifiedPush registration failed for $instance")
-    }
-
-    private fun runOffMain(block: () -> Unit) {
-        Thread { runCatching(block) }.start()
     }
 }
