@@ -1,5 +1,6 @@
 package tech.whitewolf.app.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import tech.whitewolf.app.AppContainer
 import tech.whitewolf.app.auth.LoginViewModel
+import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.subapp.SubAppRegistry
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,11 +47,18 @@ fun ShellScreen(container: AppContainer) {
     var errored by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableStateOf(0) }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pushManager = remember { PushManager(context.applicationContext) }
+    var showPushHint by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (pushManager.hasDistributor()) pushManager.enable() else showPushHint = true
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(subApp.title) },
-                actions = { TextButton(onClick = { container.auth.logout(); loggedIn = false }) { Text("Sign out") } },
+                actions = { TextButton(onClick = { pushManager.disable(); container.auth.logout(); loggedIn = false }) { Text("Sign out") } },
             )
         }
     ) { padding ->
@@ -66,7 +75,7 @@ fun ShellScreen(container: AppContainer) {
                         modifier = Modifier.padding(top = 12.dp).testTag("retry"),
                     ) { Text("Retry") }
                     Button(
-                        onClick = { container.auth.logout(); loggedIn = false },
+                        onClick = { pushManager.disable(); container.auth.logout(); loggedIn = false },
                         modifier = Modifier.padding(top = 8.dp).testTag("signout"),
                     ) { Text("Sign out") }
                 }
@@ -85,6 +94,16 @@ fun ShellScreen(container: AppContainer) {
                         )
                     }
                 }
+            }
+            if (showPushHint) {
+                Text(
+                    "For notifications, install the ntfy app via Obtainium and set its server to ntfy.whitewolf.tech.",
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(8.dp)
+                        .testTag("pushHint")
+                        .clickable { showPushHint = false },
+                )
             }
         }
     }
