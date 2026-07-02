@@ -29,7 +29,17 @@ class PushReceiver : MessagingReceiver() {
     }
 
     override fun onMessage(context: Context, message: ByteArray, instance: String) {
-        Notifications.showNewMail(context.applicationContext)
+        val app = tech.whitewolf.app.WwtApp.from(context)
+        when (wakeAction(app.isForeground)) {
+            // Foreground: the user is looking at the app — refresh the mailbox
+            // silently, no notification.
+            WakeAction.Foreground -> app.wakeBus.signalWakeForeground()
+            // Background: notify, and remember to refresh when the app returns.
+            WakeAction.Background -> {
+                Notifications.showNewMail(app)
+                app.wakeBus.signalWakeBackground()
+            }
+        }
     }
 
     override fun onUnregistered(context: Context, instance: String) {
