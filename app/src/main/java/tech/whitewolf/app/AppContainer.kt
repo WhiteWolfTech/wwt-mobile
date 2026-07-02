@@ -11,7 +11,8 @@ import tech.whitewolf.app.subapp.SubAppRegistry
 /** Manual DI: builds the real dependency graph for the shell. */
 class AppContainer(context: Context) {
     private val http = OkHttpClient()
-    private val tokenStore = TokenStore(EncryptedPrefsStore(context.applicationContext))
+    private val secureStore = EncryptedPrefsStore(context.applicationContext)
+    private val tokenStore = TokenStore(secureStore)
     private val cookies = AndroidWebCookies()
 
     // Auth base URL is the mail sub-app's origin (scheme://host) for now.
@@ -20,4 +21,6 @@ class AppContainer(context: Context) {
     }
 
     val auth = AuthRepository(http, baseUrl, tokenStore, cookies)
+    val pushApiClient = tech.whitewolf.app.push.PushApiClient(http, baseUrl) { tokenStore.token() }
+    val pushEndpointStore = tech.whitewolf.app.push.PushEndpointStore(secureStore)
 }
