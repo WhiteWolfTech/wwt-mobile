@@ -6,7 +6,7 @@
 
 **Architecture:** Self-host ntfy at `ntfy.whitewolf.tech` and point the mail backend at it (`PUSH_ENDPOINT_HOSTS`); the Android app registers a UnifiedPush endpoint with the backend (`POST /api/push/register`, Bearer token), and a `MessagingReceiver` posts a "New mail" notification on each data-light wake-up. Backend push endpoints + fan-out already exist (PR #24) — no backend code change.
 
-**Tech Stack:** Kotlin/Jetpack Compose (existing app), `org.unifiedpush.android:connector` (pinned 2.4.0), OkHttp + MockWebServer, AndroidX notifications, ntfy server (systemd + Caddy).
+**Tech Stack:** Kotlin/Jetpack Compose (existing app), `org.unifiedpush.android:connector` (pinned 2.5.0), OkHttp + MockWebServer, AndroidX notifications, ntfy server (systemd + Caddy).
 
 **Repo/branch:** `github.com/PeterRounce/wwt-mobile`, branch `feat/push-notifications`. Android paths relative to repo root `/home/dev/mobile-app`. Task 1 (infra) runs on the mail host (`project-mail`, `/home/dev/email-client-maileroo` + `/opt/maileroo`).
 
@@ -17,7 +17,7 @@
 - Distributor = **standard** UnifiedPush (ntfy app via Obtainium); **no embedded distributor**, **no foreground service**. (spec §2, §3, §8)
 - Push payload is data-light `{"type":"new_mail"}`; **no backend code change** (reuse PR #24). (spec §2)
 - Permissions after this: `INTERNET`, `POST_NOTIFICATIONS` only. (spec §8)
-- UnifiedPush connector pinned to **`org.unifiedpush.android:connector:2.4.0`** (v2 `MessagingReceiver` API). If a different connector major is used, the receiver/registration API differs (v3 uses a `PushService`) — Task 5 says to verify against the pinned version.
+- UnifiedPush connector pinned to **`org.unifiedpush.android:connector:2.5.0`** (v2 `MessagingReceiver` API). If a different connector major is used, the receiver/registration API differs (v3 uses a `PushService`) — Task 5 says to verify against the pinned version.
 - Company name in any string/comment: "White Wolf Technology" or "WWT" — never "White Wolf" alone (`whitewolf.tech` domain literals fine).
 - Install instructions use **Obtainium**, never F-Droid as the primary path.
 - Gradle runs need the toolchain env; set `dangerouslyDisableSandbox: true` on Bash calls that run Gradle:
@@ -121,7 +121,7 @@ Expected: `401` (endpoint requires auth). Full accept/reject is exercised by the
 
 In `gradle/libs.versions.toml`, add under `[versions]`:
 ```toml
-unifiedpush = "2.4.0"
+unifiedpush = "2.5.0"
 ```
 under `[libraries]`:
 ```toml
@@ -369,7 +369,7 @@ git commit   # subject: "feat(push): mail notification channel + New mail notifi
 - Consumes: `PushApiClient` (Task 3), `Notifications` (Task 4), the connector's `MessagingReceiver`.
 - Produces: `class PushReceiver : MessagingReceiver()` wired in the manifest; `AppContainer.pushApiClient: PushApiClient`.
 
-> **Connector-API note (verify against the pinned 2.4.0):** the v2 `MessagingReceiver` callbacks are `onNewEndpoint(context, endpoint: String, instance: String)`, `onMessage(context, message: ByteArray, instance: String)`, `onRegistrationFailed(context, instance: String)`, `onUnregistered(context, instance: String)`, and the manifest actions are the `org.unifiedpush.android.connector.*` set below. Before implementing, confirm these signatures/action names against `org.unifiedpush.android:connector:2.4.0` (the artifact's classes or its example app). If they differ, adjust the overrides/manifest to match — the behavior (register endpoint / show notification) is unchanged.
+> **Connector-API note (verify against the pinned 2.5.0):** the v2 `MessagingReceiver` callbacks are `onNewEndpoint(context, endpoint: String, instance: String)`, `onMessage(context, message: ByteArray, instance: String)`, `onRegistrationFailed(context, instance: String)`, `onUnregistered(context, instance: String)`, and the manifest actions are the `org.unifiedpush.android.connector.*` set below. Before implementing, confirm these signatures/action names against `org.unifiedpush.android:connector:2.5.0` (the artifact's classes or its example app). If they differ, adjust the overrides/manifest to match — the behavior (register endpoint / show notification) is unchanged.
 
 - [ ] **Step 1: Expose `pushApiClient` on `AppContainer`**
 
@@ -461,7 +461,7 @@ git commit   # subject: "feat(push): UnifiedPush receiver + POST_NOTIFICATIONS +
 - Consumes: the connector's `UnifiedPush` API, `AppContainer.pushApiClient`.
 - Produces: `class PushManager(context)` with `fun hasDistributor(): Boolean`, `fun enable()` (pick a saved/only distributor and register), `fun disable()` (unregister at the distributor). `ShellScreen` calls `enable()` when logged-in and `disable()` + backend-unregister on sign-out, and shows a hint when `!hasDistributor()`.
 
-> **Connector-API note (verify against 2.4.0):** v2 registration is `UnifiedPush.getDistributors(context): List<String>`, `UnifiedPush.saveDistributor(context, distributor)`, `UnifiedPush.registerApp(context)`, `UnifiedPush.unregisterApp(context)`. Confirm names against the pinned artifact and adjust if needed.
+> **Connector-API note (verify against 2.5.0):** v2 registration is `UnifiedPush.getDistributors(context): List<String>`, `UnifiedPush.saveDistributor(context, distributor)`, `UnifiedPush.registerApp(context)`, `UnifiedPush.unregisterApp(context)`. Confirm names against the pinned artifact and adjust if needed.
 
 - [ ] **Step 1: Implement `PushManager.kt`**
 
@@ -605,7 +605,7 @@ git commit   # subject: "docs(push): UnifiedPush onboarding runbook"  + standard
 - §9 testing (JVM PushApiClient; instrumented deferred) → Task 3 + notes on 4/5. ✓
 - §10 onboarding via Obtainium → Task 7. ✓
 
-**Placeholder scan:** No TBD/TODO. The two "Connector-API note (verify against 2.4.0)" blocks are deliberate: they pin a version and give the exact v2 API to use, instructing verification of the one version-sensitive integration point — concrete guidance, not deferred work. The `R.mipmap.ic_launcher` note names the concrete fallback to check.
+**Placeholder scan:** No TBD/TODO. The two "Connector-API note (verify against 2.5.0)" blocks are deliberate: they pin a version and give the exact v2 API to use, instructing verification of the one version-sensitive integration point — concrete guidance, not deferred work. The `R.mipmap.ic_launcher` note names the concrete fallback to check.
 
 **Type/identifier consistency:** `PushApiClient(http, baseUrl, token: () -> String?)` with `register/unregister(endpoint): Boolean` is identical across Tasks 3, 5 (AppContainer), 6. `Notifications.showNewMail(context)`/`CHANNEL_ID` consistent across 4, 5. `PushManager(context)` with `hasDistributor/enable/disable` consistent across 6. `AppContainer.pushApiClient` used by PushReceiver (5) matches its definition (5 Step 1). `POST_NOTIFICATIONS` declared (5) and requested (6). ✓
 

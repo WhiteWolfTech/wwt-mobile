@@ -70,6 +70,7 @@ dependencies {
     implementation(libs.security.crypto)
     implementation(libs.okhttp)
     implementation(libs.serialization.json)
+    implementation(libs.unifiedpush.connector)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
