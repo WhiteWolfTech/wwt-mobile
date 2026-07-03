@@ -13,12 +13,15 @@ import tech.whitewolf.app.push.PushStatus
 
 private val EXPECTED_HOST = tech.whitewolf.app.BuildConfig.NTFY_HOST
 
+/** Obtainium "Add app" source for the ntfy distributor (documented in docs/PUSH.md). */
+const val NTFY_INSTALL_URL = "https://github.com/binwiederhier/ntfy"
+
 /** Guidance copy for a push-status banner, or null when there is nothing to show ([PushStatus.Ok]). */
 fun pushBannerText(status: PushStatus): String? = when (status) {
     is PushStatus.Ok -> null
     is PushStatus.NoDistributor ->
-        "Notifications are off. Install the ntfy app via Obtainium and set its " +
-            "server to $EXPECTED_HOST."
+        "Notifications are off. In Obtainium, add this app source, then set the " +
+            "ntfy server to $EXPECTED_HOST:"
     is PushStatus.WrongServer ->
         "ntfy is installed but pointed at ${status.endpointHost}. Open ntfy and set its " +
             "server to $EXPECTED_HOST for notifications."
