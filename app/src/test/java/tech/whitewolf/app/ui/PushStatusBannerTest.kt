@@ -11,12 +11,11 @@ class PushStatusBannerTest {
         assertNull(pushBannerText(PushStatus.Ok))
     }
 
-    @Test fun noDistributorTextMentionsObtainiumAndHost() {
-        val text = pushBannerText(PushStatus.NoDistributor)
+    @Test fun noDistributorTextIntroducesTheInstallUrl() {
         assertEquals(
-            "Notifications are off. Install the ntfy app via Obtainium and set its " +
-                "server to ntfy.whitewolf.tech.",
-            text,
+            "Notifications are off. In Obtainium, add this app source, then set the " +
+                "ntfy server to ntfy.whitewolf.tech:",
+            pushBannerText(PushStatus.NoDistributor),
         )
     }
 
@@ -24,5 +23,9 @@ class PushStatusBannerTest {
         val text = pushBannerText(PushStatus.WrongServer("ntfy.sh"))
         assertTrue(text!!.contains("ntfy.sh"))
         assertTrue(text.contains("ntfy.whitewolf.tech"))
+    }
+
+    @Test fun installUrlIsTheNtfyRepo() {
+        assertEquals("https://github.com/binwiederhier/ntfy", NTFY_INSTALL_URL)
     }
 }

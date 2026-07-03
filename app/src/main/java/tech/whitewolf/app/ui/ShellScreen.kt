@@ -126,7 +126,10 @@ fun ShellScreen(container: AppContainer) {
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             val bannerText = pushBannerText(pushStatus)
             if (bannerText != null) {
-                PushStatusBanner(text = bannerText)
+                PushStatusBanner(
+                    text = bannerText,
+                    installUrl = if (pushStatus is PushStatus.NoDistributor) NTFY_INSTALL_URL else null,
+                )
             }
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
                 when {
