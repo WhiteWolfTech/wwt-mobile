@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import tech.whitewolf.app.push.PushStatus
 
-private const val EXPECTED_HOST = "ntfy.whitewolf.tech"
+private val EXPECTED_HOST = tech.whitewolf.app.BuildConfig.NTFY_HOST
 
 /** Guidance copy for a push-status banner, or null when there is nothing to show ([PushStatus.Ok]). */
 fun pushBannerText(status: PushStatus): String? = when (status) {
