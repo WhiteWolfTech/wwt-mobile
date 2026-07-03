@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
+import tech.whitewolf.app.push.PushStatusBus
 import tech.whitewolf.app.push.WakeBus
 
 /**
@@ -13,6 +14,7 @@ import tech.whitewolf.app.push.WakeBus
 class WwtApp : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
     val wakeBus = WakeBus()
+    val pushStatusBus = PushStatusBus()
 
     private val foreground = ForegroundTracker()
     val isForeground: Boolean get() = foreground.isForeground

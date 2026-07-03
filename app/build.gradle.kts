@@ -41,10 +41,12 @@ android {
     buildTypes {
         debug {
             buildConfigField("String", "MAIL_BASE_URL", "\"https://mail.whitewolf.tech\"")
+            buildConfigField("String", "NTFY_HOST", "\"ntfy.whitewolf.tech\"")
         }
         release {
             isMinifyEnabled = false
             buildConfigField("String", "MAIL_BASE_URL", "\"https://mail.whitewolf.tech\"")
+            buildConfigField("String", "NTFY_HOST", "\"ntfy.whitewolf.tech\"")
             if (releaseKeystorePath != null && file(releaseKeystorePath).exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
