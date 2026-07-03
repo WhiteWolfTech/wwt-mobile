@@ -31,24 +31,37 @@ private val EXPECTED_HOST = tech.whitewolf.app.BuildConfig.NTFY_HOST
  */
 const val NTFY_INSTALL_URL = "https://github.com/binwiederhier/ntfy-android"
 
-/** Guidance copy for a push-status banner, or null when there is nothing to show ([PushStatus.Ok]). */
-fun pushBannerText(status: PushStatus): String? = when (status) {
+/** One wizard step of the push-setup banner: label, instruction, and the URL to copy. */
+data class BannerContent(val stepLabel: String, val instruction: String, val copyUrl: String)
+
+/**
+ * Project the current push status onto banner content. The live status machine IS the
+ * wizard — no step state is stored: NoDistributor = step 1 (install ntfy),
+ * WrongServer = step 2 (point it at the WWT server), Ok = null (no banner). Completing
+ * a step advances the banner via the normal status re-check.
+ */
+fun pushBannerContent(status: PushStatus): BannerContent? = when (status) {
     is PushStatus.Ok -> null
-    is PushStatus.NoDistributor ->
-        "Notifications are off. In Obtainium, add this app source, then set the " +
-            "ntfy server to $EXPECTED_HOST:"
-    is PushStatus.WrongServer ->
-        "ntfy is installed but pointed at ${status.endpointHost}. Open ntfy and set its " +
-            "server to $EXPECTED_HOST for notifications."
+    is PushStatus.NoDistributor -> BannerContent(
+        stepLabel = "Notifications — step 1 of 2",
+        instruction = "Install ntfy: in Obtainium, add this source:",
+        copyUrl = NTFY_INSTALL_URL,
+    )
+    is PushStatus.WrongServer -> BannerContent(
+        stepLabel = "Notifications — step 2 of 2",
+        instruction = "In ntfy, set Settings → Default server to:",
+        copyUrl = "https://$EXPECTED_HOST",
+    )
 }
 
 /**
- * A live status banner shown above the WebView. Guidance text plus, when [installUrl]
- * is set, a copyable install-URL row — no deep-links, no dismiss. It appears only while
- * push is misconfigured and clears itself the moment status returns to [PushStatus.Ok].
+ * A live status banner shown above the WebView, presenting push setup as a two-step
+ * wizard: step label, one-line instruction, and a copyable URL. No actions, deep-links,
+ * or dismiss — it appears only while push is misconfigured and clears itself the moment
+ * status returns to [PushStatus.Ok].
  */
 @Composable
-fun PushStatusBanner(text: String, installUrl: String? = null, modifier: Modifier = Modifier) {
+fun PushStatusBanner(content: BannerContent, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
@@ -56,22 +69,21 @@ fun PushStatusBanner(text: String, installUrl: String? = null, modifier: Modifie
         modifier = modifier.fillMaxWidth().testTag("pushBanner"),
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(text = text)
-            if (installUrl != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = installUrl,
-                        modifier = Modifier.weight(1f).testTag("pushBannerUrl"),
-                    )
-                    TextButton(
-                        onClick = { copyInstallUrl(context, installUrl) },
-                        modifier = Modifier.padding(start = 8.dp).testTag("pushBannerCopy"),
-                    ) { Text("Copy") }
-                }
+            Text(text = content.stepLabel, style = MaterialTheme.typography.labelSmall)
+            Text(text = content.instruction, style = MaterialTheme.typography.bodyMedium)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = content.copyUrl,
+                    modifier = Modifier.weight(1f).testTag("pushBannerUrl"),
+                )
+                TextButton(
+                    onClick = { copyUrl(context, content.copyUrl) },
+                    modifier = Modifier.padding(start = 8.dp).testTag("pushBannerCopy"),
+                ) { Text("Copy") }
             }
         }
     }
@@ -81,10 +93,10 @@ fun PushStatusBanner(text: String, installUrl: String? = null, modifier: Modifie
  * Copy [url] to the clipboard. Confirm with a Toast only below Android 13 — on 13+
  * the system shows its own clipboard confirmation, and a second toast would double up.
  */
-private fun copyInstallUrl(context: Context, url: String) {
+private fun copyUrl(context: Context, url: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("ntfy install URL", url))
+    clipboard.setPrimaryClip(ClipData.newPlainText("ntfy URL", url))
     if (Build.VERSION.SDK_INT <= 32) {
-        Toast.makeText(context, "Copied install link", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
     }
 }
