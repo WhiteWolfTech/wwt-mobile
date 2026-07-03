@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import tech.whitewolf.app.MainActivity
+import tech.whitewolf.app.R
 
 /**
  * Mail notification channel + "New mail" notification. Generic content only
@@ -44,7 +45,7 @@ object Notifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("New mail")
             .setContentText("You have new mail in WWT")
             .setAutoCancel(true)
