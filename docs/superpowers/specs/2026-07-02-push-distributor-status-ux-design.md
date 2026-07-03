@@ -32,6 +32,9 @@ present status as a proper banner above the WebView, and re-check on resume.
 - A proper Material banner in the shell, laid out above the WebView (not overlaying),
   with a per-state message and a **Dismiss** button.
 - Re-check distributor state on `ON_RESUME` (liveness).
+- **Periodic re-check while a problem banner is showing** (every 30s, foreground only),
+  so a distributor installed or reconfigured while the app stays foreground is picked
+  up without waiting for a resume.
 
 **Out of scope (deferred / not needed):**
 - **Deep-link / action buttons** (open ntfy, open Obtainium) — guidance text +
@@ -54,6 +57,11 @@ present status as a proper banner above the WebView, and re-check on resume.
   Transient backend-register failures on a correct host are **not** surfaced (avoids
   nagging; self-heals on the next register).
 - **Unparseable endpoint → `Ok`** (never a false alarm).
+- **Periodic re-check is gated to problem states + foreground.** The poll loop runs only
+  while `status` is `NoDistributor`/`WrongServer` **and** the lifecycle is `RESUMED`; it
+  stops on `Ok` (endpoint changes then arrive via `onNewEndpoint`, no poll needed) and
+  suspends in the background. Cadence **30s** — the check is a local `PackageManager`
+  query + (in `WrongServer`) a re-`registerApp`, no standing network cost.
 
 ## 4. Architecture & components
 
@@ -76,10 +84,15 @@ present status as a proper banner above the WebView, and re-check on resume.
 - **`PushReceiver.onNewEndpoint`** (modify) — after the existing save + backend
   register, publish `pushStatusForEndpoint(endpoint, BuildConfig.NTFY_HOST)` to the
   bus via `WwtApp.from(app)`.
-- **`ShellScreen`** (modify) — replace the overlay `Text` with the banner; drive
-  status: on enter, `!hasDistributor()` → publish `NoDistributor`, else `enable()`;
-  collect `PushStatusBus.status`; on `ON_RESUME`, re-check `hasDistributor()` and
-  re-`enable()`/republish as needed.
+- **`ShellScreen`** (modify) — replace the overlay `Text` with the banner. A single
+  `recheck()` helper drives status: `!hasDistributor()` → publish `NoDistributor`, else
+  `enable()` (→ `onNewEndpoint` resolves `Ok`/`WrongServer`). Call it on enter, on
+  `ON_RESUME`, and from the periodic poll. Collect `PushStatusBus.status`.
+- **Periodic poll (in `ShellScreen`)** — a `LaunchedEffect` keyed on whether `status`
+  is a problem; when it is, it runs
+  `lifecycle.repeatOnLifecycle(RESUMED) { while (true) { delay(30_000); recheck() } }`,
+  so the loop exists only in a problem state and ticks only while resumed. Reaching
+  `Ok` re-keys the effect and cancels the loop.
 - **Banner composable** — a Material3 `Surface` at the top of a `Column` that also
   holds the WebView (`Modifier.weight(1f)`), so the banner occupies its own space
   above the WebView. Shows the per-state message + a **Dismiss** `TextButton`.
@@ -101,9 +114,13 @@ the wake-to-sync path are untouched.
   true → `enable()` (→ `registerApp` → `onNewEndpoint`).
 - **`onNewEndpoint`:** save + backend-register (unchanged), then
   `set(pushStatusForEndpoint(endpoint, NTFY_HOST))` → `Ok` or `WrongServer`.
-- **Resume (`ON_RESUME`):** re-evaluate `hasDistributor()`. Newly present (ntfy
-  installed while open) → `enable()` (status resolves via `onNewEndpoint`) and leave
-  `NoDistributor` behind; newly absent → `set(NoDistributor)`.
+- **Resume (`ON_RESUME`):** `recheck()` — re-evaluate `hasDistributor()`. Newly present
+  (ntfy installed while open) → `enable()` (status resolves via `onNewEndpoint`) and
+  leave `NoDistributor` behind; newly absent → `set(NoDistributor)`.
+- **Periodic (foreground, problem state only):** every 30s while a `NoDistributor`/
+  `WrongServer` banner is up and the app is resumed, `recheck()` runs — catching a
+  distributor installed or server-corrected while the app never backgrounded. Stops the
+  moment status reaches `Ok` and suspends in the background.
 
 **Dismissal:** Dismiss records the current status in a remembered `dismissedStatus`;
 the banner is shown only when `status` is a problem **and** `status != dismissedStatus`.
@@ -138,14 +155,16 @@ launches — a cold start re-shows an unresolved problem once (gentle, not naggy
   `NoDistributor` → `Ok` after a distributor appears.
 - **Manual/e2e (operator):** (a) no ntfy → no-distributor banner; (b) ntfy on default
   `ntfy.sh` → wrong-server banner naming `ntfy.sh`; (c) fix server in ntfy → banner
-  clears on resume; (d) all correct → no banner; (e) push still delivers.
+  clears on resume; (d) all correct → no banner; (e) push still delivers; (f) **install
+  ntfy while the WWT app stays foreground (split-screen) → banner clears within ~30s
+  with no app switch** (periodic poll).
 
 ## 9. Build sequencing (rough)
 
 (1) `PushStatus` + `pushStatusForEndpoint` (JVM-tested) → (2) `PushStatusBus` +
 `BuildConfig.NTFY_HOST` + wire into `WwtApp` → (3) publish from
-`PushReceiver.onNewEndpoint` → (4) `ShellScreen` banner + status drive + `ON_RESUME`
-re-check → (5) manual e2e. One PR (wwt-mobile).
+`PushReceiver.onNewEndpoint` → (4) `ShellScreen` banner + `recheck()` drive + `ON_RESUME`
+re-check + periodic poll → (5) manual e2e. One PR (wwt-mobile).
 
 ## 10. Follow-ups (logged, not in this sub-project)
 
