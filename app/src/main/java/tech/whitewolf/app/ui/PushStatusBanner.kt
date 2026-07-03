@@ -24,8 +24,12 @@ import tech.whitewolf.app.push.PushStatus
 
 private val EXPECTED_HOST = tech.whitewolf.app.BuildConfig.NTFY_HOST
 
-/** Obtainium "Add app" source for the ntfy distributor (documented in docs/PUSH.md). */
-const val NTFY_INSTALL_URL = "https://github.com/binwiederhier/ntfy"
+/**
+ * Obtainium "Add app" source for the ntfy distributor (documented in docs/PUSH.md).
+ * NOTE: this is the ntfy-android APP repo — the plain `ntfy` repo is the server and
+ * its releases carry no APK (Obtainium finds "no suitable release" there).
+ */
+const val NTFY_INSTALL_URL = "https://github.com/binwiederhier/ntfy-android"
 
 /** Guidance copy for a push-status banner, or null when there is nothing to show ([PushStatus.Ok]). */
 fun pushBannerText(status: PushStatus): String? = when (status) {
