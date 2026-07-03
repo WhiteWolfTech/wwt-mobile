@@ -59,7 +59,6 @@ fun ShellScreen(container: AppContainer) {
     val pushManager = remember { PushManager(context.applicationContext) }
     val pushStatusBus = remember { WwtApp.from(context).pushStatusBus }
     val pushStatus by pushStatusBus.status.collectAsState()
-    var dismissedStatus by remember { mutableStateOf<PushStatus?>(null) }
 
     // Re-drive push status from the current distributor state. Used on first entry, on
     // resume, and from the periodic poll. hasDistributor()/enable() are quick local
@@ -125,12 +124,9 @@ fun ShellScreen(container: AppContainer) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            val bannerText = pushStatus.takeIf { it != dismissedStatus }?.let { pushBannerText(it) }
+            val bannerText = pushBannerText(pushStatus)
             if (bannerText != null) {
-                PushStatusBanner(
-                    text = bannerText,
-                    onDismiss = { dismissedStatus = pushStatus },
-                )
+                PushStatusBanner(text = bannerText)
             }
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
                 when {
