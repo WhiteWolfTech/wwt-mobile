@@ -25,7 +25,7 @@ class PushStatusBannerTest {
         assertTrue(text.contains("ntfy.whitewolf.tech"))
     }
 
-    @Test fun installUrlIsTheNtfyRepo() {
-        assertEquals("https://github.com/binwiederhier/ntfy", NTFY_INSTALL_URL)
+    @Test fun installUrlIsTheNtfyAndroidAppRepo() {
+        assertEquals("https://github.com/binwiederhier/ntfy-android", NTFY_INSTALL_URL)
     }
 }
