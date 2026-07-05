@@ -175,6 +175,31 @@ answers, status stays `Ok`, and the wizard shows nothing — verified on-device.
 `"Install and open ntfy: in Obtainium, add this source:"`. (Opening ntfy also
 prompts its own notification permission, which the user should allow.)
 
+### A3 (2026-07-05, post-v0.3.5): state-entry trigger for the fresh re-registration
+
+**Problem (found on-device with v0.3.5):** the force-fresh path is edge-triggered
+by `ON_RESUME`, but on a **cold start** the stale endpoint arrives *after* the
+resume replay has already run — at that instant the process-fresh bus still holds
+`Ok`, so the `WrongServer` branch never matches, and no later trigger exists
+(the poll is deliberately plain). Verified: banner stuck on step 2 at startup;
+backgrounding + returning (a real resume with `WrongServer` on the bus) cleared
+it immediately.
+
+**Fix:** trigger on the state as well as the lifecycle event. In `ShellScreen`:
+
+```kotlin
+LaunchedEffect(pushStatus) {
+    if (pushStatus is PushStatus.WrongServer) pushManager.reregister()
+}
+```
+
+Fires whenever status *becomes* `WrongServer` (including the cold-start arrival).
+**Bounded by value equality:** if the server is still wrong, the fresh
+registration yields an equal `WrongServer(host)` — `StateFlow` dedupes it and an
+unchanged `LaunchedEffect` key does not restart the effect — so exactly one
+attempt per distinct wrong-host entry. The resume trigger (`recheck(true)`)
+stays: it covers "fixed while away", where the state value never changes.
+
 ### Addendum testing
 
 - **JVM:** step-1 exact-content test updated to the new instruction string.

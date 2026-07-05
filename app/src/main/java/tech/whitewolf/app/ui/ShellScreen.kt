@@ -93,6 +93,17 @@ fun ShellScreen(container: AppContainer) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // State-entry trigger for the fresh re-registration: on a cold start the stale
+    // endpoint arrives AFTER the resume replay has already run (the process-fresh bus
+    // still held Ok at that instant), so the resume path alone never re-registers.
+    // Fires once whenever status BECOMES WrongServer; bounded because a still-wrong
+    // server returns an equal WrongServer(host) — StateFlow dedupes it and an unchanged
+    // key does not restart this effect. The resume trigger still covers "fixed while
+    // away", where the value never changes.
+    LaunchedEffect(pushStatus) {
+        if (pushStatus is PushStatus.WrongServer) pushManager.reregister()
+    }
+
     // Periodic liveness while a problem banner is up and the app is foreground: catches a
     // distributor installed/reconfigured without the app ever backgrounding (e.g.
     // split-screen install). Keyed on isProblem so the loop exists only in a problem
