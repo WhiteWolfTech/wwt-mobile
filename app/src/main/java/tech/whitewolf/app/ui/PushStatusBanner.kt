@@ -31,28 +31,34 @@ private val EXPECTED_HOST = tech.whitewolf.app.BuildConfig.NTFY_HOST
  */
 const val NTFY_INSTALL_URL = "https://github.com/binwiederhier/ntfy-android"
 
-/** One wizard step of the push-setup banner: label, instruction, and the URL to copy. */
-data class BannerContent(val stepLabel: String, val instruction: String, val copyUrl: String)
+/** One wizard step of the push-setup banner: label, instruction, and an optional URL to copy. */
+data class BannerContent(val stepLabel: String, val instruction: String, val copyUrl: String?)
 
 /**
  * Project the current push status onto banner content. The live status machine IS the
  * wizard — no step state is stored: NoDistributor = step 1 (install ntfy),
- * WrongServer = step 2 (point it at the WWT server), Ok = null (no banner). Completing
- * a step advances the banner via the normal status re-check.
+ * WrongServer = step 2 (point it at the WWT server), Ok + notifications blocked = a
+ * final unnumbered step, Ok + enabled = null (no banner). Transport problems win over
+ * the permission state.
  */
-fun pushBannerContent(status: PushStatus): BannerContent? = when (status) {
-    is PushStatus.Ok -> null
-    is PushStatus.NoDistributor -> BannerContent(
-        stepLabel = "Notifications — step 1 of 2",
-        instruction = "Install ntfy: in Obtainium, add this source:",
-        copyUrl = NTFY_INSTALL_URL,
-    )
-    is PushStatus.WrongServer -> BannerContent(
-        stepLabel = "Notifications — step 2 of 2",
-        instruction = "In ntfy, set Settings → Default server to:",
-        copyUrl = "https://$EXPECTED_HOST",
-    )
-}
+fun pushBannerContent(status: PushStatus, notificationsEnabled: Boolean): BannerContent? =
+    when (status) {
+        is PushStatus.NoDistributor -> BannerContent(
+            stepLabel = "Notifications — step 1 of 2",
+            instruction = "Install and open ntfy: in Obtainium, add this source:",
+            copyUrl = NTFY_INSTALL_URL,
+        )
+        is PushStatus.WrongServer -> BannerContent(
+            stepLabel = "Notifications — step 2 of 2",
+            instruction = "In ntfy, set Settings → Default server to:",
+            copyUrl = "https://$EXPECTED_HOST",
+        )
+        is PushStatus.Ok -> if (notificationsEnabled) null else BannerContent(
+            stepLabel = "Notifications — one last thing",
+            instruction = "Allow notifications for WWT in Settings → Apps → WWT → Notifications.",
+            copyUrl = null,
+        )
+    }
 
 /**
  * A live status banner shown above the WebView, presenting push setup as a two-step
@@ -71,19 +77,22 @@ fun PushStatusBanner(content: BannerContent, modifier: Modifier = Modifier) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(text = content.stepLabel, style = MaterialTheme.typography.labelSmall)
             Text(text = content.instruction, style = MaterialTheme.typography.bodyMedium)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    text = content.copyUrl,
-                    modifier = Modifier.weight(1f).testTag("pushBannerUrl"),
-                )
-                TextButton(
-                    onClick = { copyUrl(context, content.copyUrl) },
-                    modifier = Modifier.padding(start = 8.dp).testTag("pushBannerCopy"),
-                ) { Text("Copy") }
+            val url = content.copyUrl
+            if (url != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = url,
+                        modifier = Modifier.weight(1f).testTag("pushBannerUrl"),
+                    )
+                    TextButton(
+                        onClick = { copyUrl(context, url) },
+                        modifier = Modifier.padding(start = 8.dp).testTag("pushBannerCopy"),
+                    ) { Text("Copy") }
+                }
             }
         }
     }

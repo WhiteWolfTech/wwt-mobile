@@ -1,6 +1,8 @@
 package tech.whitewolf.app.ui
 
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
+import androidx.core.app.NotificationManagerCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +35,7 @@ import kotlinx.coroutines.delay
 import tech.whitewolf.app.AppContainer
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
+import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.push.PushStatus
 import tech.whitewolf.app.subapp.SubAppRegistry
@@ -59,27 +62,32 @@ fun ShellScreen(container: AppContainer) {
     val pushManager = remember { PushManager(context.applicationContext) }
     val pushStatusBus = remember { WwtApp.from(context).pushStatusBus }
     val pushStatus by pushStatusBus.status.collectAsState()
+    var notificationsEnabled by remember { mutableStateOf(true) }
 
-    // Re-drive push status from the current distributor state. Used on first entry, on
-    // resume, and from the periodic poll. hasDistributor()/enable() are quick local
-    // PackageManager/connector calls (no network); enable() re-registers, and
-    // onNewEndpoint then publishes Ok/WrongServer.
-    val recheck = {
-        if (!pushManager.hasDistributor()) {
-            pushStatusBus.set(PushStatus.NoDistributor)
-        } else {
-            pushManager.enable()
+    // Re-drive push status from the current distributor state; also refresh whether WWT
+    // can actually show notifications. Used on entry, resume, and the periodic poll.
+    // forceFresh (resume only): in WrongServer, re-register from scratch — ntfy pins a
+    // registration to the server that was its default when the registration was created,
+    // so a plain register returns the stale endpoint forever after the user fixes the
+    // server. unregister+register makes ntfy issue a fresh one against its current server.
+    val recheck: (Boolean) -> Unit = { forceFresh ->
+        notificationsEnabled = areWwtNotificationsEnabled(context)
+        when {
+            !pushManager.hasDistributor() -> pushStatusBus.set(PushStatus.NoDistributor)
+            forceFresh && pushStatusBus.status.value is PushStatus.WrongServer ->
+                pushManager.reregister()
+            else -> pushManager.enable()
         }
     }
 
-    LaunchedEffect(Unit) { recheck() }
+    LaunchedEffect(Unit) { recheck(false) }
 
     // Liveness on resume: catches a distributor installed/removed/reconfigured while the
     // app was backgrounded (the common "went to fix it, came back" path).
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) recheck()
+            if (event == Lifecycle.Event.ON_RESUME) recheck(true)
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -90,13 +98,13 @@ fun ShellScreen(container: AppContainer) {
     // split-screen install). Keyed on isProblem so the loop exists only in a problem
     // state and cancels the moment status reaches Ok; each tick is gated on RESUMED so
     // nothing runs in the background.
-    val isProblem = pushStatus !is PushStatus.Ok
+    val isProblem = pushStatus !is PushStatus.Ok || !notificationsEnabled
     LaunchedEffect(isProblem) {
         if (!isProblem) return@LaunchedEffect
         while (true) {
             delay(30_000)
             if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                recheck()
+                recheck(false)
             }
         }
     }
@@ -124,7 +132,7 @@ fun ShellScreen(container: AppContainer) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            val bannerContent = pushBannerContent(pushStatus)
+            val bannerContent = pushBannerContent(pushStatus, notificationsEnabled)
             if (bannerContent != null) {
                 PushStatusBanner(content = bannerContent)
             }
@@ -164,4 +172,16 @@ fun ShellScreen(container: AppContainer) {
             }
         }
     }
+}
+
+/**
+ * True when WWT can actually show notifications: app-level enabled AND the Mail channel
+ * not blocked. A channel that doesn't exist yet counts as enabled (it is created on the
+ * first notification).
+ */
+private fun areWwtNotificationsEnabled(context: Context): Boolean {
+    val nm = NotificationManagerCompat.from(context)
+    if (!nm.areNotificationsEnabled()) return false
+    val channel = nm.getNotificationChannel(Notifications.CHANNEL_ID)
+    return channel == null || channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
 }

@@ -18,4 +18,14 @@ class PushManager(private val context: Context) {
     fun disable() {
         UnifiedPush.unregisterApp(context)
     }
+
+    /**
+     * Drop the current registration and register anew. Needed after the distributor's
+     * server changes: ntfy pins a registration to the server that was its default when
+     * the registration was created, so enable() alone returns the stale endpoint forever.
+     */
+    fun reregister() {
+        UnifiedPush.unregisterApp(context)
+        enable()
+    }
 }
