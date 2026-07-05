@@ -1,8 +1,13 @@
-# Notification-Permission Check in the Push Wizard — Design Spec
+# Push Wizard Robustness (v0.3.5) — Design Spec
 
-**Date:** 2026-07-03
+**Date:** 2026-07-03 (addendum 2026-07-05)
 **Status:** Approved design — ready for implementation planning
 **Sub-project:** Foundation / push polish (extends the v0.3.4 step-wizard banner)
+
+> Covers three approved changes shipping together as v0.3.5: the
+> notification-permission check (below, approved 2026-07-03) and the two
+> wizard-robustness fixes in the **Addendum** (approved 2026-07-05), both born
+> from on-device QA: the stopped-state trap and the stale-registration trap.
 
 ## 1. Context & goal
 
@@ -121,3 +126,62 @@ review → PR → release **v0.3.5** on the operator's word.
 Actionable banner (deep-link to Obtainium/ntfy/system settings) remains the
 logged follow-up — the permission step is its strongest future candidate (a
 direct `APP_NOTIFICATION_SETTINGS` intent).
+
+---
+
+## Addendum (2026-07-05): wizard robustness fixes
+
+Two traps found by on-device QA (operator walkthrough, 2026-07-03/05), both
+fixed here.
+
+### A1. Force fresh registration on resume in `WrongServer` (stale-registration trap)
+
+**Problem:** ntfy pins each UnifiedPush registration to the server that was its
+default *at registration time*. After the user corrects ntfy's default server, a
+plain `registerApp()` returns the **existing stale endpoint** (old server), so
+`WrongServer` never clears — verified on-device (banner stuck on step 2) and
+server-side (ntfy.whitewolf.tech `subscribers=0` after the server change). The
+only manual escape is deleting the `up…` subscription in ntfy.
+
+**Fix:** on `ON_RESUME`, when a distributor is present **and** the current
+status is `WrongServer`, re-register from scratch:
+- `PushManager` gains `fun reregister() { UnifiedPush.unregisterApp(context);
+  enable() }` — the programmatic equivalent of deleting the topic in ntfy's UI,
+  followed by fresh registration against ntfy's *current* default server.
+- `ShellScreen` resume path: `if (pushManager.hasDistributor() && status is
+  WrongServer) reregister() else recheck()`. Entry and the 30s poll keep the
+  plain `recheck()`.
+
+**Why resume-only, not the 30s poll:** changing ntfy's settings requires
+leaving the app, so resume is precisely the "they may have just fixed it"
+moment; polling would delete+create a remote registration against a third-party
+server every 30s while misconfigured. (Split-screen server editing — both apps
+resumed, no ON_RESUME on return — is a known, accepted gap.)
+
+**Behavior when the server is still wrong:** the fresh registration comes back
+on the wrong host again → still `WrongServer`; one churn cycle per app-resume,
+bounded, harmless. `PushReceiver.onUnregistered` is already a safe no-op;
+the backend prunes dead endpoints on 404/410 as before.
+
+### A2. Step 1 copy: "install **and open**" (stopped-state trap)
+
+**Problem:** a freshly installed, never-opened app is in Android's stopped
+state and receives no broadcasts; the UnifiedPush connector sends registrations
+as plain package-targeted broadcasts (verified in connector 2.5.0 bytecode — no
+`FLAG_INCLUDE_STOPPED_PACKAGES`). Installed-but-unopened ntfy therefore never
+answers, status stays `Ok`, and the wizard shows nothing — verified on-device.
+
+**Fix (copy only):** step 1 instruction becomes
+`"Install and open ntfy: in Obtainium, add this source:"`. (Opening ntfy also
+prompts its own notification permission, which the user should allow.)
+
+### Addendum testing
+
+- **JVM:** step-1 exact-content test updated to the new instruction string.
+  (`reregister()` is a two-line connector pass-through — covered by the build
+  gate and e2e, consistent with `enable()`/`disable()` which have no JVM tests.)
+- **Manual/e2e (operator):** reproduce the stale trap — ntfy registered on
+  `ntfy.sh`, then set default server to `https://ntfy.whitewolf.tech`, return
+  to WWT → banner clears on resume WITHOUT deleting the `up…` topic; server-side
+  ntfy shows `subscribers=1`. Fresh-install path: install ntfy, do NOT open it →
+  wizard still shows step 1 with the new copy.
