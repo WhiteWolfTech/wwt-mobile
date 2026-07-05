@@ -6,29 +6,40 @@ import org.junit.Test
 import tech.whitewolf.app.push.PushStatus
 
 class PushStatusBannerTest {
-    @Test fun okHasNoBannerContent() {
-        assertNull(pushBannerContent(PushStatus.Ok))
+    @Test fun okWithNotificationsEnabledHasNoBanner() {
+        assertNull(pushBannerContent(PushStatus.Ok, notificationsEnabled = true))
     }
 
-    @Test fun noDistributorIsStepOneWithInstallUrl() {
+    @Test fun okWithNotificationsBlockedIsTheFinalStep() {
         assertEquals(
             BannerContent(
-                stepLabel = "Notifications — step 1 of 2",
-                instruction = "Install ntfy: in Obtainium, add this source:",
-                copyUrl = NTFY_INSTALL_URL,
+                stepLabel = "Notifications — one last thing",
+                instruction = "Allow notifications for WWT in Settings → Apps → WWT → Notifications.",
+                copyUrl = null,
             ),
-            pushBannerContent(PushStatus.NoDistributor),
+            pushBannerContent(PushStatus.Ok, notificationsEnabled = false),
         )
     }
 
-    @Test fun wrongServerIsStepTwoWithServerUrlAndNoHostInCopy() {
+    @Test fun noDistributorIsStepOneAndWinsOverBlockedNotifications() {
+        assertEquals(
+            BannerContent(
+                stepLabel = "Notifications — step 1 of 2",
+                instruction = "Install and open ntfy: in Obtainium, add this source:",
+                copyUrl = NTFY_INSTALL_URL,
+            ),
+            pushBannerContent(PushStatus.NoDistributor, notificationsEnabled = false),
+        )
+    }
+
+    @Test fun wrongServerIsStepTwoAndWinsOverBlockedNotifications() {
         assertEquals(
             BannerContent(
                 stepLabel = "Notifications — step 2 of 2",
                 instruction = "In ntfy, set Settings → Default server to:",
                 copyUrl = "https://ntfy.whitewolf.tech",
             ),
-            pushBannerContent(PushStatus.WrongServer("ntfy.sh")),
+            pushBannerContent(PushStatus.WrongServer("ntfy.sh"), notificationsEnabled = false),
         )
     }
 
