@@ -1,3 +1,140 @@
+# Back Button + Pull-to-Refresh Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** System back navigates the WebView's history instead of exiting; a native pull-to-refresh gesture at the top of the mail list fires `window.wwtWake()`.
+
+**Architecture:** All changes live in the WebView host layer: `SubAppWebView.kt` gains a `BackHandler` driven by `doUpdateVisitedHistory`, and its WebView gets wrapped in a `SwipeRefreshLayout` gated by a new `ShellBridge` JavaScript interface (`window.WwtShell.setAtTop` — the SPA side is already deployed).
+
+**Tech Stack:** Kotlin + Jetpack Compose shell, classic `androidx.swiperefreshlayout` view (Compose pull-refresh cannot see WebView inner scroll), JUnit unit tests.
+
+**Spec:** `docs/superpowers/specs/2026-07-06-back-button-pull-refresh-design.md`
+
+## Global Constraints
+
+- Kotlin/Compose conventions of this repo; keep UI wiring thin, logic in plain testable classes.
+- One new dependency ONLY: `androidx.swiperefreshlayout:swiperefreshlayout:1.1.0` via the version catalog.
+- `ShellBridge.atTop` defaults `false` — against an SPA that never calls the bridge, the gesture must never arm.
+- The refresh spinner stops after 800 ms for the wake path (no completion signal); the reload path stops it on `onPageFinished`.
+- Verification gate: `./gradlew :app:testDebugUnitTest` green (the repo's CI release gate) and `./gradlew :app:assembleDebug` compiles. Instrumented tests exist in the repo but cannot run here (no emulator) — do not add instrumented tests.
+- Work in `/home/dev/mobile-app-worktrees/shell-back-ptr` on branch `feat/back-button-pull-refresh` (worktree of `/home/dev/mobile-app`, based on origin/master `9127427`).
+
+---
+
+### Task 1: ShellBridge + pull-to-refresh + back button
+
+One task: the pieces share `SubAppWebView.kt` and reviewing them together is cheaper than splitting.
+
+**Files:**
+- Create: `app/src/main/java/tech/whitewolf/app/web/ShellBridge.kt`
+- Test: `app/src/test/java/tech/whitewolf/app/web/ShellBridgeTest.kt`
+- Modify: `gradle/libs.versions.toml`, `app/build.gradle.kts` (the one new dependency)
+- Modify: `app/src/main/java/tech/whitewolf/app/ui/SubAppWebView.kt`
+
+**Interfaces:**
+- Produces: `class ShellBridge { @Volatile var atTop: Boolean; @JavascriptInterface fun setAtTop(v: Boolean) }`; `SubAppWebView` keeps its existing signature (`subApp`, `sessionToken`, `onPageError`, `onPageLoaded`) — callers (ShellScreen) need no changes.
+
+- [ ] **Step 1: Write the failing unit test**
+
+Create `app/src/test/java/tech/whitewolf/app/web/ShellBridgeTest.kt`:
+
+```kotlin
+package tech.whitewolf.app.web
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ShellBridgeTest {
+    @Test
+    fun `atTop defaults to false so the gesture never arms without SPA reports`() {
+        assertFalse(ShellBridge().atTop)
+    }
+
+    @Test
+    fun `setAtTop updates the flag both ways`() {
+        val bridge = ShellBridge()
+        bridge.setAtTop(true)
+        assertTrue(bridge.atTop)
+        bridge.setAtTop(false)
+        assertFalse(bridge.atTop)
+    }
+
+    @Test
+    fun `value written on another thread is visible to the reader`() {
+        val bridge = ShellBridge()
+        val t = Thread { bridge.setAtTop(true) }
+        t.start()
+        t.join()
+        assertTrue(bridge.atTop)
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `./gradlew :app:testDebugUnitTest --tests 'tech.whitewolf.app.web.ShellBridgeTest'`
+Expected: compilation FAILURE — `ShellBridge` does not exist.
+
+- [ ] **Step 3: Implement `ShellBridge.kt`**
+
+```kotlin
+package tech.whitewolf.app.web
+
+import android.webkit.JavascriptInterface
+
+/**
+ * SPA → shell signal injected into the WebView as `window.WwtShell`. The web
+ * app reports whether its mail list is visible and scrolled to the top — the
+ * only state where a downward drag should arm pull-to-refresh instead of
+ * scrolling content. Defaults to false so an SPA that never reports (older
+ * deploy, different page) leaves the gesture inert.
+ *
+ * setAtTop is invoked on the WebView's JS bridge thread while the UI thread
+ * reads atTop from SwipeRefreshLayout's child-scroll callback — hence @Volatile.
+ */
+class ShellBridge {
+    @Volatile
+    var atTop: Boolean = false
+        private set
+
+    @JavascriptInterface
+    fun setAtTop(v: Boolean) {
+        atTop = v
+    }
+}
+```
+
+- [ ] **Step 4: Run to verify it passes**
+
+Run: `./gradlew :app:testDebugUnitTest --tests 'tech.whitewolf.app.web.ShellBridgeTest'`
+Expected: PASS (3 tests).
+
+- [ ] **Step 5: Add the SwipeRefreshLayout dependency**
+
+`gradle/libs.versions.toml` — under `[versions]` add:
+
+```toml
+swiperefreshlayout = "1.1.0"
+```
+
+Under `[libraries]` add:
+
+```toml
+swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swiperefreshlayout" }
+```
+
+`app/build.gradle.kts` — in `dependencies`, after `implementation(libs.activity.compose)`:
+
+```kotlin
+    implementation(libs.swiperefreshlayout)
+```
+
+- [ ] **Step 6: Rework `SubAppWebView.kt`**
+
+Apply these changes (full resulting file below — replace the file with this content):
+
+```kotlin
 package tech.whitewolf.app.ui
 
 import android.annotation.SuppressLint
@@ -179,3 +316,44 @@ fun SubAppWebView(
         }
     })
 }
+```
+
+What changed vs the previous version (for the reviewer's orientation):
+- `BackHandler` + `canGoBack` state + `doUpdateVisitedHistory` override.
+- The factory now returns a `SwipeRefreshLayout` wrapping the WebView; `addJavascriptInterface(bridge, "WwtShell")`; refresh listener + child-scroll gate; `onPageFinished` additionally stops the spinner (covers the reload path; harmless on normal loads).
+- Everything else (wake plumbing, cookie seeding, NavPolicy routing, security settings, comments) is byte-identical to before.
+
+- [ ] **Step 7: Full unit suite + debug build**
+
+Run: `./gradlew :app:testDebugUnitTest :app:assembleDebug`
+Expected: BUILD SUCCESSFUL, all unit tests pass.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add gradle/libs.versions.toml app/build.gradle.kts \
+  app/src/main/java/tech/whitewolf/app/web/ShellBridge.kt \
+  app/src/test/java/tech/whitewolf/app/web/ShellBridgeTest.kt \
+  app/src/main/java/tech/whitewolf/app/ui/SubAppWebView.kt
+git commit -m "feat(shell): back-button WebView navigation + pull-to-refresh
+
+System back now walks the WebView history (the SPA creates real
+entries since webmail PR #32) and only exits at the root. A
+SwipeRefreshLayout wraps the WebView, armed solely when the SPA
+reports list-at-top via the new window.WwtShell bridge (webmail
+PR #33); refresh fires window.wwtWake()."
+```
+
+---
+
+## Manual verification (operator, on-device — not possible in this environment)
+
+1. Open the app → open a thread → system back returns to the list (does not exit); back again from the list exits.
+2. At the top of the list, pull down → native spinner → list refreshes (send yourself a mail first to see it appear).
+3. Scroll mid-list, drag down → the list scrolls; no spinner.
+4. Open compose or a thread → pull down → no spinner.
+
+## Final verification
+
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug` green.
+- No instrumented tests added; existing ones untouched.

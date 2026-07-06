@@ -64,6 +64,7 @@ android {
 dependencies {
     implementation(libs.core.ktx)
     implementation(libs.activity.compose)
+    implementation(libs.swiperefreshlayout)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
