@@ -11,8 +11,24 @@ app when new mail arrives.
    expects Firebase, which GrapheneOS doesn't have). Note: the plain
    `binwiederhier/ntfy` repo is the *server* — it has no APK.
 2. Open the ntfy app → **Settings → Default server** → set to
-   `https://ntfy.whitewolf.tech`.
+   `https://ntfy.whitewolf.tech`. (Opening ntfy once matters — a
+   never-opened app can't receive the WWT app's registration.)
 3. Install/open the **WWT app** (Obtainium) and **allow notifications** when asked.
+
+### ntfy will ask you about…
+
+On first open (and in its settings), ntfy prompts for a few things. Answer yes to
+all three — each is needed for reliable delivery on GrapheneOS:
+
+- **Notification permission** → **Allow.** This is for ntfy's own delivery/status
+  notifications; the "New mail" alert itself comes from the WWT app, which asks
+  separately (step 3).
+- **WebSockets / instant delivery** → **Accept.** With no Google services, ntfy
+  keeps its own connection to `ntfy.whitewolf.tech` — this is what makes wake-ups
+  instant.
+- **Battery optimization exemption** → **Accept.** Stops Android from killing that
+  connection in the background; without it, notifications arrive late or not at
+  all once the phone dozes.
 
 ## Verify
 Send yourself an email → a **"New mail"** notification should appear within a few
@@ -23,4 +39,5 @@ seconds; tapping it opens the mailbox.
   actual mail when opened.
 - If you didn't install a distributor, the app shows a hint and works fine without
   notifications until you do.
-- No Google Play Services or foreground service is used.
+- No Google Play Services are used, and the WWT app itself runs no foreground
+  service — the persistent delivery connection is ntfy's own.
