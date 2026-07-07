@@ -35,6 +35,7 @@ import kotlinx.coroutines.delay
 import tech.whitewolf.app.AppContainer
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
+import tech.whitewolf.app.net.ConnectivityMonitor
 import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.push.PushStatus
@@ -57,12 +58,20 @@ fun ShellScreen(container: AppContainer) {
     var loading by remember { mutableStateOf(true) }
     var errored by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableStateOf(0) }
+    val retry: () -> Unit = { errored = false; loading = true; reloadKey++ }
 
     val context = LocalContext.current
     val pushManager = remember { PushManager(context.applicationContext) }
     val pushStatusBus = remember { WwtApp.from(context).pushStatusBus }
     val pushStatus by pushStatusBus.status.collectAsState()
     var notificationsEnabled by remember { mutableStateOf(true) }
+
+    val connectivity = remember { ConnectivityMonitor(context.applicationContext) }
+    val online by connectivity.online.collectAsState()
+    DisposableEffect(Unit) {
+        connectivity.start()
+        onDispose { connectivity.stop() }
+    }
 
     // Re-drive push status from the current distributor state; also refresh whether WWT
     // can actually show notifications. Used on entry, resume, and the periodic poll.
@@ -87,7 +96,13 @@ fun ShellScreen(container: AppContainer) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) recheck(true)
+            if (event == Lifecycle.Event.ON_RESUME) {
+                recheck(true)
+                // Reopening the app is the natural "try again" moment: if the
+                // error screen is up and we're online, retry without waiting
+                // for the 30s tick.
+                if (errored && online) retry()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -118,6 +133,24 @@ fun ShellScreen(container: AppContainer) {
                 recheck(false)
             }
         }
+    }
+
+    // Offline-aware auto-retry: a load failure no longer latches forever.
+    // Immediate retry when a usable connection (re)appears; every 30s while
+    // online (short server blips); never while offline. Each retry waits for
+    // RESUMED so nothing reloads from the background. retry() flips `errored`,
+    // which restarts this effect — a recurring failure lands back here and
+    // waits the full interval, so there is no tight loop.
+    var wasOnline by remember { mutableStateOf(online) }
+    LaunchedEffect(errored, online) {
+        val cameOnline = online && !wasOnline
+        wasOnline = online
+        if (!errored || !online) return@LaunchedEffect
+        if (!cameOnline) delay(ERROR_RETRY_MS)
+        while (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            delay(ERROR_RETRY_MS)
+        }
+        retry()
     }
 
     val signOut = {
@@ -154,9 +187,9 @@ fun ShellScreen(container: AppContainer) {
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("Couldn't reach ${subApp.title}.")
+                        Text(errorMessageFor(online, subApp.title))
                         Button(
-                            onClick = { errored = false; loading = true; reloadKey++ },
+                            onClick = retry,
                             modifier = Modifier.padding(top = 12.dp).testTag("retry"),
                         ) { Text("Retry") }
                         Button(
@@ -196,3 +229,10 @@ private fun areWwtNotificationsEnabled(context: Context): Boolean {
     val channel = nm.getNotificationChannel(Notifications.CHANNEL_ID)
     return channel == null || channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
 }
+
+private const val ERROR_RETRY_MS = 30_000L
+
+/** Copy for the main-frame load-error screen: offline vs server-unreachable. */
+internal fun errorMessageFor(online: Boolean, title: String): String =
+    if (online) "Couldn't reach $title."
+    else "You're offline. Waiting for a connection…"
