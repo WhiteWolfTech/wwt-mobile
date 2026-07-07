@@ -3,6 +3,7 @@ package tech.whitewolf.app.ui
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -162,7 +163,18 @@ fun SubAppWebView(
 
         SwipeRefreshLayout(ctx).apply {
             refreshLayout = this
-            addView(wv)
+            // Explicit MATCH_PARENT params: without them the WebView is added
+            // with default WRAP_CONTENT layout params, and Chromium then sizes
+            // the page's CSS layout viewport to 0px tall (vh/dvh/100% all
+            // collapse) even though the view itself is drawn full-size — the
+            // 2026-07-07 blank-app incident.
+            addView(
+                wv,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
             // Arm the gesture ONLY when the SPA says its list is visible and at
             // the top ("child can scroll up" everywhere else, so drags scroll).
             setOnChildScrollUpCallback { _, _ -> !bridge.atTop }
