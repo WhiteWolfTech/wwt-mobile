@@ -48,11 +48,15 @@ fun ShellScreen(container: AppContainer) {
     // registration on a token the server has since revoked) invalidates the session, and
     // the shell must fall back to the native login rather than sit on a dead token.
     val loggedIn by container.sessionBus.loggedIn.collectAsState()
+    val sessionInvalidated by container.sessionBus.invalidated.collectAsState()
 
     if (!loggedIn) {
         val vm = remember { LoginViewModel(container.auth) }
         val state by vm.state.collectAsState()
-        LoginScreen(state, vm::onEmail, vm::onPassword, vm::submit)
+        LoginScreen(
+            state, vm::onEmail, vm::onPassword, vm::submit,
+            notice = sessionNoticeFor(sessionInvalidated),
+        )
         return
     }
 
@@ -167,17 +171,27 @@ fun ShellScreen(container: AppContainer) {
 
     val signOut = {
         val endpoint = container.pushEndpointStore.get()
+        // Gate before the teardown starts: unregister() below uses the live bearer and may
+        // earn a 401, but this sign-out is deliberate — no "session expired" notice.
+        container.sessionBus.beginSignOut()
         pushManager.disable()
         Thread {
             // Order matters: unregister uses the live bearer token, so it must run before
             // logout() clears the token. Not tied to composition, so it survives the
             // screen leaving composition when loggedIn flips.
-            if (endpoint != null) container.pushApiClient.unregister(endpoint)
-            container.pushEndpointStore.clear()
-            container.auth.logout()
+            try {
+                if (endpoint != null) container.pushApiClient.unregister(endpoint)
+                container.pushEndpointStore.clear()
+                container.auth.logout()
+            } finally {
+                // Must run even if the teardown throws (EncryptedSharedPreferences can): a
+                // gate left raised would suppress every real session-expiry notice from here
+                // on, which is worse than the spurious notice it exists to prevent.
+                container.sessionBus.endSignOut()
+            }
         }.start()
         // Flip the UI now; the thread above clears the token a moment later.
-        container.sessionBus.set(false)
+        container.sessionBus.signedOut()
     }
 
     Scaffold(
@@ -249,3 +263,8 @@ private const val ERROR_RETRY_MS = 30_000L
 internal fun errorMessageFor(online: Boolean, title: String): String =
     if (online) "Couldn't reach $title."
     else "You're offline. Waiting for a connection…"
+
+/** Copy for the login screen when the server invalidated our token (WWT-57). Null on a
+ *  deliberate sign-out — the user knows why they are there. */
+internal fun sessionNoticeFor(invalidated: Boolean): String? =
+    if (invalidated) "Your session expired. Please sign in again." else null

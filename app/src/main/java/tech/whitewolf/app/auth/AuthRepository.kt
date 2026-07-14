@@ -78,14 +78,20 @@ class AuthRepository(
     }
 
     /**
-     * Forgets the session: clears the native bearer and the WebView's cookie jar, and
-     * flips [SessionBus] so the shell shows the native login. Safe to call from a
-     * background thread (the push client calls it on a 401).
+     * The server rejected our token: forget the session and let the login screen say so.
+     * Safe to call from a background thread (the push client calls it on a 401).
+     *
+     * Distinct from [logout] only in what the user is told — a sign-out they asked for
+     * needs no explanation, a session yanked out from under them does.
      */
     fun invalidate() {
+        forget()
+        session.invalidate()
+    }
+
+    private fun forget() {
         tokenStore.clear()
         cookies.clear(baseUrl)
-        session.set(false)
     }
 
     override fun login(email: String, password: String): LoginResult {
@@ -106,7 +112,7 @@ class AuthRepository(
                             } else {
                                 tokenStore.save(parsed.token, parsed.expires)
                                 sessionCookieFrom(resp.headers("Set-Cookie"))?.let { cookies.seed(baseUrl, it) }
-                                session.set(true)
+                                session.signedIn()
                                 LoginResult.Success
                             }
                         } catch (e: kotlinx.serialization.SerializationException) {
@@ -120,5 +126,10 @@ class AuthRepository(
         }
     }
 
-    override fun logout() = invalidate()
+    /** The user asked to sign out. Same teardown as [invalidate], but no notice: they know
+     *  why they are looking at the login screen. */
+    override fun logout() {
+        forget()
+        session.signedOut()
+    }
 }

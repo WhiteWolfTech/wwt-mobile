@@ -130,6 +130,30 @@ class AuthRepositoryTest {
         assertFalse(session.loggedIn.value)
     }
 
+    /** A sign-out the user asked for needs no explanation — only a server-side rejection
+     *  raises "Your session expired". */
+    @Test fun logoutRaisesNoSessionExpiredNotice() {
+        val store = freshStore(); store.save("t", 9999L)
+        val session = SessionBus(true)
+        repoWith(store, FakeCookies(), session).logout()
+        assertFalse(session.invalidated.value)
+    }
+
+    @Test fun loginClearsAStaleSessionExpiredNotice() {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "session=u.9999.sig; Path=/; HttpOnly")
+                .setBody("""{"ok":true,"token":"u.9999.sig","expires":9999}""")
+        )
+        val session = SessionBus(false)
+        session.invalidate()
+
+        repoWith(freshStore(), FakeCookies(), session).login("a@x.tech", "pw")
+        assertTrue(session.loggedIn.value)
+        assertFalse(session.invalidated.value)
+    }
+
     @Test fun validateSendsBearerToApiMe() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"id":1}"""))
         val store = freshStore(); store.save("u.9999.sig", 9999L)
@@ -165,6 +189,7 @@ class AuthRepositoryTest {
         assertNull(store.token())
         assertTrue(cookies.cleared)
         assertFalse(session.loggedIn.value)
+        assertTrue("an involuntary logout must explain itself", session.invalidated.value)
     }
 
     /** Offline is not signed-out: a dropped connection must never destroy the session. */
