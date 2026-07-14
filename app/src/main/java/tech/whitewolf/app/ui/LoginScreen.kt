@@ -26,6 +26,7 @@ fun LoginScreen(
     onEmail: (String) -> Unit,
     onPassword: (String) -> Unit,
     onSubmit: () -> Unit,
+    notice: String? = null,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -33,6 +34,13 @@ fun LoginScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("White Wolf Technology", style = MaterialTheme.typography.headlineSmall)
+        if (notice != null) {
+            Text(
+                notice,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 12.dp).testTag("notice"),
+            )
+        }
         OutlinedTextField(
             value = state.email, onValueChange = onEmail,
             label = { Text("Email") }, singleLine = true,
