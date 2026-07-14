@@ -44,12 +44,14 @@ import tech.whitewolf.app.subapp.SubAppRegistry
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShellScreen(container: AppContainer) {
-    var loggedIn by remember { mutableStateOf(container.auth.isLoggedIn()) }
+    // Signed-in state comes from the session bus, not a local flag: a background 401 (push
+    // registration on a token the server has since revoked) invalidates the session, and
+    // the shell must fall back to the native login rather than sit on a dead token.
+    val loggedIn by container.sessionBus.loggedIn.collectAsState()
 
     if (!loggedIn) {
         val vm = remember { LoginViewModel(container.auth) }
         val state by vm.state.collectAsState()
-        LaunchedEffect(state.loggedIn) { if (state.loggedIn) loggedIn = true }
         LoginScreen(state, vm::onEmail, vm::onPassword, vm::submit)
         return
     }
@@ -89,15 +91,25 @@ fun ShellScreen(container: AppContainer) {
         }
     }
 
-    LaunchedEffect(Unit) { recheck(false) }
+    // Ask the server whether the stored bearer is still accepted. The local expiry check
+    // can say "valid" long after the backend revoked it — a token_version bump invalidates
+    // every outstanding session on deploy and nothing tells the shell. A 401 clears the
+    // token and flips the session bus, dropping us to the native login on the next frame;
+    // a network failure changes nothing (validate() only signs out on an explicit 401).
+    // Runs off the main thread: OkHttp on the UI thread would throw.
+    val validateSession: () -> Unit = { Thread { container.auth.validate() }.start() }
+
+    LaunchedEffect(Unit) { recheck(false); validateSession() }
 
     // Liveness on resume: catches a distributor installed/removed/reconfigured while the
-    // app was backgrounded (the common "went to fix it, came back" path).
+    // app was backgrounded (the common "went to fix it, came back" path), and a session
+    // revoked while we were away.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 recheck(true)
+                validateSession()
                 // Reopening the app is the natural "try again" moment: if the
                 // error screen is up and we're online, retry without waiting
                 // for the 30s tick.
@@ -164,7 +176,8 @@ fun ShellScreen(container: AppContainer) {
             container.pushEndpointStore.clear()
             container.auth.logout()
         }.start()
-        loggedIn = false
+        // Flip the UI now; the thread above clears the token a moment later.
+        container.sessionBus.set(false)
     }
 
     Scaffold(

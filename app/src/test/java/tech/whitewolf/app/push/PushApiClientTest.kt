@@ -12,8 +12,13 @@ import org.junit.Test
 
 class PushApiClientTest {
     private lateinit var server: MockWebServer
-    private fun client(token: String?) =
-        PushApiClient(OkHttpClient(), server.url("/").toString().trimEnd('/'), { token })
+    private fun client(token: String?, onUnauthorized: () -> Unit = {}) =
+        PushApiClient(
+            OkHttpClient(),
+            server.url("/").toString().trimEnd('/'),
+            { token },
+            onUnauthorized,
+        )
 
     @Before fun setUp() { server = MockWebServer(); server.start() }
     @After fun tearDown() { server.shutdown() }
@@ -44,5 +49,38 @@ class PushApiClientTest {
     @Test fun non2xxReturnsFalse() {
         server.enqueue(MockResponse().setResponseCode(401))
         assertFalse(client("t").register("https://ntfy.whitewolf.tech/UPabc?up=1"))
+    }
+
+    /** WWT-57: a 401 means the bearer is dead server-side (e.g. a token_version bump on
+     *  deploy revoked it). The shell must be told, or it retries the corpse forever and
+     *  push silently stays broken. */
+    @Test fun unauthorizedSignalsTheDeadToken() {
+        server.enqueue(MockResponse().setResponseCode(401))
+        var invalidated = 0
+        assertFalse(client("stale") { invalidated++ }.register("https://ntfy.whitewolf.tech/UPabc?up=1"))
+        assertEquals(1, invalidated)
+    }
+
+    @Test fun unregisterUnauthorizedAlsoSignalsTheDeadToken() {
+        server.enqueue(MockResponse().setResponseCode(401))
+        var invalidated = 0
+        assertFalse(client("stale") { invalidated++ }.unregister("https://ntfy.whitewolf.tech/UPabc?up=1"))
+        assertEquals(1, invalidated)
+    }
+
+    /** A server hiccup is not a dead token — signing the user out on a 500 would be worse
+     *  than the bug. */
+    @Test fun serverErrorDoesNotSignalTheDeadToken() {
+        server.enqueue(MockResponse().setResponseCode(500))
+        var invalidated = 0
+        assertFalse(client("t") { invalidated++ }.register("https://ntfy.whitewolf.tech/UPabc?up=1"))
+        assertEquals(0, invalidated)
+    }
+
+    @Test fun successDoesNotSignalTheDeadToken() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"ok":true}"""))
+        var invalidated = 0
+        assertTrue(client("t") { invalidated++ }.register("https://ntfy.whitewolf.tech/UPabc?up=1"))
+        assertEquals(0, invalidated)
     }
 }

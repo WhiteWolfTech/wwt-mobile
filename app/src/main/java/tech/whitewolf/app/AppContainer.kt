@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import tech.whitewolf.app.auth.AndroidWebCookies
 import tech.whitewolf.app.auth.AuthRepository
 import tech.whitewolf.app.auth.EncryptedPrefsStore
+import tech.whitewolf.app.auth.SessionBus
 import tech.whitewolf.app.auth.TokenStore
 import tech.whitewolf.app.subapp.SubAppRegistry
 
@@ -20,7 +21,16 @@ class AppContainer(context: Context) {
         val u = java.net.URI(it.url); "${u.scheme}://${u.host}"
     }
 
-    val auth = AuthRepository(http, baseUrl, tokenStore, cookies)
-    val pushApiClient = tech.whitewolf.app.push.PushApiClient(http, baseUrl) { tokenStore.token() }
+    val sessionBus = SessionBus(tokenStore.token() != null)
+    val auth = AuthRepository(http, baseUrl, tokenStore, cookies, sessionBus)
+
+    // A 401 from the push registry means the bearer is dead server-side: drop the session
+    // rather than retrying a stale token forever.
+    val pushApiClient = tech.whitewolf.app.push.PushApiClient(
+        http,
+        baseUrl,
+        { tokenStore.token() },
+        { auth.invalidate() },
+    )
     val pushEndpointStore = tech.whitewolf.app.push.PushEndpointStore(secureStore)
 }
