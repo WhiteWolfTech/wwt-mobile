@@ -25,6 +25,14 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Native OIDC SSO (WWT-67): a public client against wwt-auth (Authelia).
+        buildConfigField("String", "OIDC_ISSUER", "\"https://auth.whitewolf.tech\"")
+        buildConfigField("String", "OIDC_CLIENT_ID", "\"maileroo-mobile\"")
+        buildConfigField("String", "OIDC_REDIRECT_URI", "\"tech.whitewolf.app:/oauth2redirect\"")
+        // AppAuth's RedirectUriReceiverActivity binds this custom scheme (the redirect
+        // URI's scheme) via the library manifest — no manual <activity> needed.
+        manifestPlaceholders["appAuthRedirectScheme"] = "tech.whitewolf.app"
     }
 
     if (releaseKeystorePath != null && file(releaseKeystorePath).exists()) {
@@ -75,6 +83,7 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.coroutines.core)
     implementation(libs.unifiedpush.connector)
+    implementation(libs.appauth)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)

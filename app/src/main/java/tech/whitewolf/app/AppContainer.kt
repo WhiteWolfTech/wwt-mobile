@@ -5,7 +5,10 @@ import okhttp3.OkHttpClient
 import tech.whitewolf.app.auth.AndroidWebCookies
 import tech.whitewolf.app.auth.AuthRepository
 import tech.whitewolf.app.auth.EncryptedPrefsStore
+import tech.whitewolf.app.auth.OidcAuthService
+import tech.whitewolf.app.auth.OidcSsoLogin
 import tech.whitewolf.app.auth.SessionBus
+import tech.whitewolf.app.auth.SsoLogin
 import tech.whitewolf.app.auth.TokenStore
 import tech.whitewolf.app.subapp.SubAppRegistry
 
@@ -23,6 +26,11 @@ class AppContainer(context: Context) {
 
     val sessionBus = SessionBus(tokenStore.token() != null)
     val auth = AuthRepository(http, baseUrl, tokenStore, cookies, sessionBus)
+
+    // Native SSO: AppAuth runs the OIDC flow against wwt-auth; OidcSsoLogin threads the
+    // resulting ID token into the mail backend's /api/auth/native to mint the session.
+    val ssoLogin: SsoLogin =
+        OidcSsoLogin(OidcAuthService(context.applicationContext), auth)
 
     // A 401 from the push registry means the bearer is dead server-side: drop the session
     // rather than retrying a stale token forever.

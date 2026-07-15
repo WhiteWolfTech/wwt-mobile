@@ -1,5 +1,6 @@
 package tech.whitewolf.app.auth
 
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
@@ -21,6 +22,7 @@ data class LoginUiState(
 
 class LoginViewModel(
     private val auth: Authenticator,
+    private val sso: SsoLogin? = null,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
     private val _state = MutableStateFlow(LoginUiState())
@@ -40,6 +42,58 @@ class LoginViewModel(
                     is LoginResult.Success -> it.copy(loading = false, loggedIn = true)
                     is LoginResult.InvalidCredentials ->
                         it.copy(loading = false, error = "Incorrect email or password")
+                    is LoginResult.Error -> it.copy(loading = false, error = result.message)
+                }
+            }
+        }
+    }
+
+    /** Whether the SSO button should be offered (an SSO collaborator is wired). */
+    val ssoAvailable: Boolean get() = sso != null
+
+    /**
+     * Starts SSO: builds the AppAuth authorization intent (OIDC discovery runs off the
+     * main thread) and hands it to [launchTab], which opens the Custom Tab. The result
+     * returns through [onSsoResult].
+     */
+    fun startSso(launchTab: (Intent) -> Unit) {
+        val s = sso ?: return
+        if (_state.value.loading) return
+        _state.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                val intent = withContext(io) { s.authorizationIntent() }
+                launchTab(intent)
+            } catch (e: Exception) {
+                _state.update { it.copy(loading = false, error = e.message ?: "Couldn't start sign-in") }
+            }
+        }
+    }
+
+    /**
+     * Handles the Custom Tab result: completes the token exchange and mints the app
+     * session. A null [data] means the user dismissed the tab without finishing — no
+     * error, just stop the spinner.
+     */
+    fun onSsoResult(data: Intent?) {
+        val s = sso ?: return
+        if (data == null) {
+            _state.update { it.copy(loading = false) }
+            return
+        }
+        _state.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            val result = withContext(io) {
+                try {
+                    s.signIn(data)
+                } catch (e: Exception) {
+                    LoginResult.Error(e.message ?: "SSO sign-in failed")
+                }
+            }
+            _state.update {
+                when (result) {
+                    is LoginResult.Success -> it.copy(loading = false, loggedIn = true)
+                    is LoginResult.InvalidCredentials -> it.copy(loading = false, error = "Sign-in was rejected")
                     is LoginResult.Error -> it.copy(loading = false, error = result.message)
                 }
             }
