@@ -10,6 +10,16 @@ plugins {
 val appVersionName: String = (findProperty("versionName") as String?) ?: "0.1.0"
 val appVersionCode: Int = (findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
 
+// Git commit baked into BuildConfig.GIT_SHA so the app can report which build it is.
+// CI passes -PgitSha (the tagged commit); local builds fall back to the live short SHA;
+// a non-git checkout falls back to "dev".
+val gitSha: String = (findProperty("gitSha") as String?)?.takeIf { it.isNotBlank() }
+    ?: runCatching {
+        providers.exec { commandLine("git", "rev-parse", "--short", "HEAD") }
+            .standardOutput.asText.get().trim()
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+    ?: "dev"
+
 // Release signing is configured only when CI provides a keystore via env; absent it,
 // release builds are unsigned and debug/tests are unaffected.
 val releaseKeystorePath: String? = System.getenv("RELEASE_KEYSTORE_PATH")
@@ -24,6 +34,7 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Native OIDC SSO (WWT-67): a public client against wwt-auth (Authelia).
