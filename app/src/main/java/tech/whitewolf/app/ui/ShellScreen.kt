@@ -1,6 +1,8 @@
 package tech.whitewolf.app.ui
 
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.core.app.NotificationManagerCompat
 import androidx.compose.foundation.layout.Box
@@ -51,11 +53,15 @@ fun ShellScreen(container: AppContainer) {
     val sessionInvalidated by container.sessionBus.invalidated.collectAsState()
 
     if (!loggedIn) {
-        val vm = remember { LoginViewModel(container.auth) }
+        val vm = remember { LoginViewModel(container.auth, container.ssoLogin) }
         val state by vm.state.collectAsState()
+        val ssoLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result -> vm.onSsoResult(result.data) }
         LoginScreen(
             state, vm::onEmail, vm::onPassword, vm::submit,
             notice = sessionNoticeFor(sessionInvalidated),
+            onSso = { vm.startSso { intent -> ssoLauncher.launch(intent) } },
         )
         return
     }

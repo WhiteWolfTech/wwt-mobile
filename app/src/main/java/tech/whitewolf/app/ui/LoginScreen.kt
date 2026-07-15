@@ -11,6 +11,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +28,7 @@ fun LoginScreen(
     onPassword: (String) -> Unit,
     onSubmit: () -> Unit,
     notice: String? = null,
+    onSso: (() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
@@ -66,6 +68,13 @@ fun LoginScreen(
             enabled = !state.loading,
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp).testTag("submit"),
         ) { Text("Sign in") }
+        if (onSso != null) {
+            TextButton(
+                onClick = onSso,
+                enabled = !state.loading,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("sso"),
+            ) { Text("Sign in with WhiteWolf SSO") }
+        }
         if (state.loading) {
             CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp).testTag("progress"))
         }

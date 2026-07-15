@@ -1,11 +1,13 @@
 package tech.whitewolf.app.auth
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 
 sealed interface LoginResult {
@@ -28,6 +30,7 @@ class AuthRepository(
     private val session: SessionBus = SessionBus(tokenStore.token() != null),
 ) : Authenticator {
     @Serializable private data class LoginReq(val email: String, val password: String)
+    @Serializable private data class NativeReq(@SerialName("id_token") val idToken: String)
     @Serializable private data class LoginResp(val ok: Boolean = false, val token: String = "", val expires: Long = 0)
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -104,27 +107,55 @@ class AuthRepository(
                 when {
                     resp.code == 401 -> LoginResult.InvalidCredentials
                     !resp.isSuccessful -> LoginResult.Error("server returned ${resp.code}")
-                    else -> {
-                        try {
-                            val parsed = json.decodeFromString(LoginResp.serializer(), bodyStr)
-                            if (!parsed.ok || parsed.token.isBlank()) {
-                                LoginResult.Error("malformed login response")
-                            } else {
-                                tokenStore.save(parsed.token, parsed.expires)
-                                sessionCookieFrom(resp.headers("Set-Cookie"))?.let { cookies.seed(baseUrl, it) }
-                                session.signedIn()
-                                LoginResult.Success
-                            }
-                        } catch (e: kotlinx.serialization.SerializationException) {
-                            LoginResult.Error("malformed login response")
-                        }
-                    }
+                    else -> storeSession(resp, bodyStr)
                 }
             }
         } catch (e: IOException) {
             LoginResult.Error(e.message ?: "network error")
         }
     }
+
+    /**
+     * Signs in with wwt-auth SSO. The caller (via AppAuth) has already run the
+     * Authorization Code + PKCE flow against the identity provider and holds the
+     * resulting [idToken]; here we hand it to the mail backend's native SSO endpoint,
+     * which verifies it and returns the same session token + cookie that password login
+     * would. Reuses the identical token-storing tail. Blocking; call off the main thread.
+     */
+    fun loginWithSso(idToken: String): LoginResult {
+        val body = json.encodeToString(NativeReq.serializer(), NativeReq(idToken))
+            .toRequestBody(jsonMedia)
+        val req = Request.Builder().url("$baseUrl/api/auth/native").post(body).build()
+        return try {
+            http.newCall(req).execute().use { resp ->
+                val bodyStr = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) LoginResult.Error("SSO sign-in failed (${resp.code})")
+                else storeSession(resp, bodyStr)
+            }
+        } catch (e: IOException) {
+            LoginResult.Error(e.message ?: "network error")
+        }
+    }
+
+    /**
+     * Parses a successful login / SSO token response, stores the bearer, seeds the
+     * WebView session cookie, and marks the session signed-in. Shared by the password
+     * and SSO paths — both return the same `{ok, token, expires}` shape.
+     */
+    private fun storeSession(resp: Response, bodyStr: String): LoginResult =
+        try {
+            val parsed = json.decodeFromString(LoginResp.serializer(), bodyStr)
+            if (!parsed.ok || parsed.token.isBlank()) {
+                LoginResult.Error("malformed login response")
+            } else {
+                tokenStore.save(parsed.token, parsed.expires)
+                sessionCookieFrom(resp.headers("Set-Cookie"))?.let { cookies.seed(baseUrl, it) }
+                session.signedIn()
+                LoginResult.Success
+            }
+        } catch (e: kotlinx.serialization.SerializationException) {
+            LoginResult.Error("malformed login response")
+        }
 
     /** The user asked to sign out. Same teardown as [invalidate], but no notice: they know
      *  why they are looking at the login screen. */

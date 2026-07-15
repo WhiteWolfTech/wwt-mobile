@@ -223,4 +223,45 @@ class AuthRepositoryTest {
         assertFalse(repoWith(freshStore(), FakeCookies(), session).validate())
         assertEquals(0, server.requestCount)
     }
+
+    @Test fun ssoSuccessPostsIdTokenStoresTokenAndSeedsCookie() {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "session=u.42.sig; Path=/; HttpOnly")
+                .setBody("""{"ok":true,"token":"u.42.sig","expires":42}""")
+        )
+        val store = freshStore()
+        val cookies = FakeCookies()
+        val result = repo(store, cookies).loginWithSso("id.jwt.token")
+
+        assertEquals(LoginResult.Success, result)
+        assertEquals("u.42.sig", store.token())
+        assertTrue(cookies.seededHeader!!.startsWith("session=u.42.sig"))
+
+        val sent = server.takeRequest()
+        assertEquals("POST", sent.method)
+        assertEquals("/api/auth/native", sent.path)
+        assertTrue(sent.body.readUtf8().contains("\"id_token\":\"id.jwt.token\""))
+    }
+
+    @Test fun ssoRejectionReturnsErrorAndStoresNothing() {
+        server.enqueue(MockResponse().setResponseCode(403).setBody("account not on domain"))
+        val store = freshStore()
+        val result = repo(store, FakeCookies()).loginWithSso("id.jwt.token")
+        assertTrue(result is LoginResult.Error)
+        assertNull(store.token())
+    }
+
+    @Test fun ssoMarksSessionLoggedIn() {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "session=u.42.sig; Path=/; HttpOnly")
+                .setBody("""{"ok":true,"token":"u.42.sig","expires":42}""")
+        )
+        val session = SessionBus(false)
+        repoWith(freshStore(), FakeCookies(), session).loginWithSso("id.jwt.token")
+        assertTrue(session.loggedIn.value)
+    }
 }
