@@ -1,5 +1,10 @@
 package tech.whitewolf.app.web
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,5 +31,20 @@ class ShellBridgeTest {
         t.start()
         t.join()
         assertTrue(bridge.atTop)
+    }
+
+    @Test
+    fun `appInfo json carries the version name, build code, and commit`() {
+        val obj = Json.parseToJsonElement(buildAppInfoJson("0.5.0", 500, "e624edc")).jsonObject
+        assertEquals("0.5.0", obj["version"]!!.jsonPrimitive.content)
+        assertEquals(500, obj["code"]!!.jsonPrimitive.int)
+        assertEquals("e624edc", obj["commit"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `appInfo json escapes special characters so it stays parseable`() {
+        // A naive string-concat build would produce invalid JSON here.
+        val obj = Json.parseToJsonElement(buildAppInfoJson("1.0.0", 1, "a\"b\\c")).jsonObject
+        assertEquals("a\"b\\c", obj["commit"]!!.jsonPrimitive.content)
     }
 }

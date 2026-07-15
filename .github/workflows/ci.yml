@@ -44,4 +44,6 @@ jobs:
         run: ./gradlew :app:testDebugUnitTest
 
       - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: ./gradlew :app:assembleDebug -PgitSha="${GIT_SHA:0:7}"
