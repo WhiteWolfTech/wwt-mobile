@@ -24,6 +24,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubApp
@@ -101,6 +103,14 @@ fun SubAppWebView(
             }
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.safeBrowsingEnabled = true
+
+            // Honor system dark mode: when the host DayNight theme is dark, let the
+            // WebView report `prefers-color-scheme: dark` so the (dark-aware) SPA
+            // themes itself rather than staying light. Feature-guarded — without
+            // support the page simply renders light. (WWT-91)
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
+            }
 
             // One-way SPA → shell signal gating pull-to-refresh (see ShellBridge).
             // Main-frame navigation is pinned to subApp.host by NavPolicy, and the

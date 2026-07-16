@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.unifiedpush.connector)
     implementation(libs.appauth)
+    implementation(libs.webkit)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
