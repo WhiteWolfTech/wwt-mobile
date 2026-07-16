@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark variant of Theme.WwtApp, selected automatically when the system is in
+         dark mode. The dark Material parent has isLightTheme=false, which is what
+         tells the WebView (via setAlgorithmicDarkeningAllowed) to render dark. -->
+    <style name="Theme.WwtApp" parent="@android:style/Theme.Material.NoActionBar" />
+</resources>

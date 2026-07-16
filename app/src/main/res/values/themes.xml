@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DayNight host theme. The activity theme is the reliable signal the WebView
+         reads to decide light vs dark (isLightTheme + night uiMode), and it themes
+         the window/status bar. The -night variant flips this to the dark Material
+         theme automatically when the system is in dark mode. (WWT-91) -->
+    <style name="Theme.WwtApp" parent="@android:style/Theme.Material.Light.NoActionBar" />
+</resources>
