@@ -1,5 +1,6 @@
 package tech.whitewolf.app.auth
 
+import android.content.Intent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -19,6 +20,11 @@ private class FakeAuth(private val result: LoginResult) : Authenticator {
     override fun login(email: String, password: String): LoginResult = result
     override fun isLoggedIn(): Boolean = false
     override fun logout() = Unit
+}
+
+private class FakeSso : SsoLogin {
+    override suspend fun authorizationIntent(): Intent = error("no flow should start in these tests")
+    override suspend fun signIn(resultData: Intent): LoginResult = error("no exchange should run in these tests")
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -49,5 +55,17 @@ class LoginViewModelTest {
         val vm = LoginViewModel(FakeAuth(LoginResult.Error("network error")), io = dispatcher)
         vm.submit(); advanceUntilIdle()
         assertEquals("network error", vm.state.value.error)
+    }
+
+    /** WWT-173: a 500 at the IdP means the redirect never fires, so the result comes back
+     *  null — indistinguishable from the user swiping the tab away. Either way the app
+     *  must say something rather than silently stop the spinner. */
+    @Test fun unfinishedSsoTellsTheUserToRetry() = runTest(dispatcher) {
+        val vm = LoginViewModel(FakeAuth(LoginResult.Success), FakeSso(), dispatcher)
+        vm.onSsoResult(null)
+        advanceUntilIdle()
+        assertEquals("Sign-in didn't complete — tap to try again", vm.state.value.error)
+        assertFalse(vm.state.value.loading)
+        assertFalse(vm.state.value.loggedIn)
     }
 }
