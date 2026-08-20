@@ -12,6 +12,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * What the user is told when SSO does not produce a session. Deliberately the same for
+ * every cause (WWT-173, WWT-177): a dismissed tab and a failed one are indistinguishable
+ * from the activity result, and the provider's own wording — which arrives verbatim as
+ * AuthorizationException.message — is a diagnostic, not something a user can act on.
+ */
+internal const val SSO_INCOMPLETE = "Sign-in didn't complete — tap to try again"
+
 data class LoginUiState(
     val email: String = "",
     val password: String = "",
@@ -81,23 +89,39 @@ class LoginViewModel(
     fun onSsoResult(data: Intent?) {
         val s = sso ?: return
         if (data == null) {
-            _state.update { it.copy(loading = false, error = "Sign-in didn't complete — tap to try again") }
+            _state.update { it.copy(loading = false, error = SSO_INCOMPLETE) }
             return
         }
+        completeSso { s.signIn(data) }
+    }
+
+    /**
+     * Runs an SSO exchange and maps its outcome onto the UI state.
+     *
+     * Split from [onSsoResult] so the failure mapping carries no Android types: the
+     * [Intent] is only a token handed to the collaborator, and keeping it out of here is
+     * what makes every failure path reachable from a unit test.
+     */
+    internal fun completeSso(exchange: suspend () -> LoginResult) {
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             val result = withContext(io) {
                 try {
-                    s.signIn(data)
+                    exchange()
                 } catch (e: Exception) {
                     LoginResult.Error(e.message ?: "SSO sign-in failed")
                 }
+            }
+            // The cause is worth keeping, just not worth showing: log it once here, where
+            // both a thrown exception and a backend rejection have converged.
+            if (result is LoginResult.Error) {
+                android.util.Log.w("LoginViewModel", "SSO sign-in failed: ${result.message}")
             }
             _state.update {
                 when (result) {
                     is LoginResult.Success -> it.copy(loading = false, loggedIn = true)
                     is LoginResult.InvalidCredentials -> it.copy(loading = false, error = "Sign-in was rejected")
-                    is LoginResult.Error -> it.copy(loading = false, error = result.message)
+                    is LoginResult.Error -> it.copy(loading = false, error = SSO_INCOMPLETE)
                 }
             }
         }

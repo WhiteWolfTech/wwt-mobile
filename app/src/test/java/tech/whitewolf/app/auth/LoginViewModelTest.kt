@@ -68,4 +68,26 @@ class LoginViewModelTest {
         assertFalse(vm.state.value.loading)
         assertFalse(vm.state.value.loggedIn)
     }
+
+    /** WWT-177: this is Authelia's own prose, arriving as AuthorizationException.message
+     *  (AppAuth passes error_description straight to Exception's message). It is not ours
+     *  to show a user. */
+    @Test fun providerErrorTextNeverReachesTheUser() = runTest(dispatcher) {
+        val authelia = "The authorization server encountered an unexpected condition " +
+            "that prevented it from fulfilling the request. Could not perform consent."
+        val vm = LoginViewModel(FakeAuth(LoginResult.Success), FakeSso(), dispatcher)
+        vm.completeSso { throw IllegalStateException(authelia) }
+        advanceUntilIdle()
+        assertEquals("Sign-in didn't complete — tap to try again", vm.state.value.error)
+        assertFalse(vm.state.value.loading)
+        assertFalse(vm.state.value.loggedIn)
+    }
+
+    /** The backend's own rejection wording is no more use to a user than the IdP's. */
+    @Test fun backendRejectionTextNeverReachesTheUser() = runTest(dispatcher) {
+        val vm = LoginViewModel(FakeAuth(LoginResult.Success), FakeSso(), dispatcher)
+        vm.completeSso { LoginResult.Error("SSO sign-in failed (500)") }
+        advanceUntilIdle()
+        assertEquals("Sign-in didn't complete — tap to try again", vm.state.value.error)
+    }
 }
