@@ -72,13 +72,16 @@ class LoginViewModel(
 
     /**
      * Handles the Custom Tab result: completes the token exchange and mints the app
-     * session. A null [data] means the user dismissed the tab without finishing — no
-     * error, just stop the spinner.
+     * session. A null [data] is ambiguous — AppAuth returns it both when the user
+     * dismisses the tab and when the tab ends on an IdP error page (WWT-173: an expired
+     * consent challenge surfaces as a raw 500, so the redirect never fires). The two
+     * cannot be told apart from the result, so say something true of both rather than
+     * stopping the spinner in silence.
      */
     fun onSsoResult(data: Intent?) {
         val s = sso ?: return
         if (data == null) {
-            _state.update { it.copy(loading = false) }
+            _state.update { it.copy(loading = false, error = "Sign-in didn't complete — tap to try again") }
             return
         }
         _state.update { it.copy(loading = true, error = null) }
