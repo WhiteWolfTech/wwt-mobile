@@ -147,3 +147,7 @@ Requires a JDK 17 and the Android SDK (point `ANDROID_HOME` at it).
 Release version and git SHA are injected by CI via `-PversionName` /
 `-PversionCode` / `-PgitSha`; local builds fall back to dev defaults and the live
 short SHA.
+
+## Licence
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
