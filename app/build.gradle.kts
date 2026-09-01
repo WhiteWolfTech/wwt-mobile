@@ -20,6 +20,19 @@ val gitSha: String = (findProperty("gitSha") as String?)?.takeIf { it.isNotBlank
     }.getOrNull()?.takeIf { it.isNotBlank() }
     ?: "dev"
 
+// Backend endpoints. Default to the White Wolf deployment; each takes a -P override
+// so a contributor can point a build at their own mail backend and OIDC provider
+// without editing this file. OIDC_REDIRECT_URI is deliberately not overridable — it
+// is tied to applicationId and the AppAuth manifest placeholder below.
+val mailBaseUrl: String = (findProperty("mailBaseUrl") as String?)
+    ?.takeIf { it.isNotBlank() } ?: "https://mail.whitewolf.tech"
+val ntfyHost: String = (findProperty("ntfyHost") as String?)
+    ?.takeIf { it.isNotBlank() } ?: "ntfy.whitewolf.tech"
+val oidcIssuer: String = (findProperty("oidcIssuer") as String?)
+    ?.takeIf { it.isNotBlank() } ?: "https://auth.whitewolf.tech"
+val oidcClientId: String = (findProperty("oidcClientId") as String?)
+    ?.takeIf { it.isNotBlank() } ?: "maileroo-mobile"
+
 // Release signing is configured only when CI provides a keystore via env; absent it,
 // release builds are unsigned and debug/tests are unaffected.
 val releaseKeystorePath: String? = System.getenv("RELEASE_KEYSTORE_PATH")
@@ -37,9 +50,12 @@ android {
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        buildConfigField("String", "MAIL_BASE_URL", "\"$mailBaseUrl\"")
+        buildConfigField("String", "NTFY_HOST", "\"$ntfyHost\"")
+
         // Native OIDC SSO (WWT-67): a public client against wwt-auth (Authelia).
-        buildConfigField("String", "OIDC_ISSUER", "\"https://auth.whitewolf.tech\"")
-        buildConfigField("String", "OIDC_CLIENT_ID", "\"maileroo-mobile\"")
+        buildConfigField("String", "OIDC_ISSUER", "\"$oidcIssuer\"")
+        buildConfigField("String", "OIDC_CLIENT_ID", "\"$oidcClientId\"")
         buildConfigField("String", "OIDC_REDIRECT_URI", "\"tech.whitewolf.app:/oauth2redirect\"")
         // AppAuth's RedirectUriReceiverActivity binds this custom scheme (the redirect
         // URI's scheme) via the library manifest — no manual <activity> needed.
@@ -58,14 +74,8 @@ android {
     }
 
     buildTypes {
-        debug {
-            buildConfigField("String", "MAIL_BASE_URL", "\"https://mail.whitewolf.tech\"")
-            buildConfigField("String", "NTFY_HOST", "\"ntfy.whitewolf.tech\"")
-        }
         release {
             isMinifyEnabled = false
-            buildConfigField("String", "MAIL_BASE_URL", "\"https://mail.whitewolf.tech\"")
-            buildConfigField("String", "NTFY_HOST", "\"ntfy.whitewolf.tech\"")
             if (releaseKeystorePath != null && file(releaseKeystorePath).exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
