@@ -148,6 +148,24 @@ Release version and git SHA are injected by CI via `-PversionName` /
 `-PversionCode` / `-PgitSha`; local builds fall back to dev defaults and the live
 short SHA.
 
+### Pointing a build at another backend
+
+The endpoints default to the White Wolf deployment and each takes a `-P` override,
+so you can build against your own mail backend and OIDC provider without editing
+`app/build.gradle.kts`:
+
+```bash
+./gradlew :app:assembleDebug \
+  -PmailBaseUrl=https://mail.example.test \
+  -PntfyHost=ntfy.example.test \
+  -PoidcIssuer=https://auth.example.test \
+  -PoidcClientId=my-client
+```
+
+The redirect URI (`tech.whitewolf.app:/oauth2redirect`) is not overridable — it is
+tied to `applicationId` and the AppAuth manifest placeholder, so register that same
+URI with your own provider.
+
 ## Licence
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
