@@ -14,8 +14,15 @@ is a different app to Android).
 keytool -genkeypair -v -keystore wwt-release.jks \
   -alias wwt -keyalg RSA -keysize 4096 -validity 10000 \
   -dname "CN=White Wolf Technology, O=White Wolf Technology"
-# choose a strong store password and key password when prompted
+# choose a strong password when prompted
 ```
+
+Modern `keytool` writes a **PKCS12** keystore, which stores one password: the key
+password and the store password must be **identical**. `keytool` accepts a
+differing `-keypass` and silently ignores it, so `RELEASE_KEY_PASSWORD` and
+`RELEASE_KEYSTORE_PASSWORD` must be set to the same value — otherwise
+`:app:packageRelease` fails with `Get Key failed: Given final block not properly
+padded`.
 
 ## One-time: set the GitHub Actions secrets
 
