@@ -19,14 +19,14 @@ keytool -genkeypair -v -keystore wwt-release.jks \
 
 ## One-time: set the GitHub Actions secrets
 
-From a checkout of `PeterRounce/wwt-mobile` (requires `gh auth login` with repo
+From a checkout of `WhiteWolfTech/wwt-mobile` (requires `gh auth login` with repo
 admin):
 
 ```bash
-base64 -w0 wwt-release.jks | gh secret set RELEASE_KEYSTORE_BASE64 -R PeterRounce/wwt-mobile
-gh secret set RELEASE_KEYSTORE_PASSWORD -R PeterRounce/wwt-mobile   # paste the store password
-gh secret set RELEASE_KEY_ALIAS -b "wwt" -R PeterRounce/wwt-mobile
-gh secret set RELEASE_KEY_PASSWORD -R PeterRounce/wwt-mobile        # paste the key password
+base64 -w0 wwt-release.jks | gh secret set RELEASE_KEYSTORE_BASE64 -R WhiteWolfTech/wwt-mobile
+gh secret set RELEASE_KEYSTORE_PASSWORD -R WhiteWolfTech/wwt-mobile   # paste the store password
+gh secret set RELEASE_KEY_ALIAS -b "wwt" -R WhiteWolfTech/wwt-mobile
+gh secret set RELEASE_KEY_PASSWORD -R WhiteWolfTech/wwt-mobile        # paste the key password
 ```
 
 ## Cutting a release
@@ -43,13 +43,18 @@ version is a valid Android update.
 
 ## Installing / updating via Obtainium
 
-The repo is **private**, so Obtainium needs a GitHub token:
+The repo is public, so Obtainium needs no token:
 
-1. In Obtainium → **Settings → Source-specific → GitHub → Personal Access Token**,
-   add a token with read access to `PeterRounce/wwt-mobile`.
-2. **Add app** → paste `https://github.com/PeterRounce/wwt-mobile` → select the
+1. **Add app** → paste `https://github.com/WhiteWolfTech/wwt-mobile` → select the
    **GitHub** source.
-3. Obtainium tracks the latest release and installs `wwt-<version>.apk`. Pushing a
+2. Obtainium tracks the latest release and installs `wwt-<version>.apk`. Pushing a
    newer tag later surfaces an update automatically.
 
 The same signed APK installs on GrapheneOS and stock-Android Pixels.
+
+### Signing key change at v0.6.6
+
+The release signing key was regenerated when the repo moved to the
+`WhiteWolfTech` org. Android treats a differently-signed APK as a different app,
+so **v0.6.5 and earlier cannot be updated in place** — uninstall the old copy
+before installing v0.6.6. Releases from v0.6.6 onward update normally.
