@@ -1,6 +1,8 @@
 package tech.whitewolf.app.ui
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +43,7 @@ import tech.whitewolf.app.net.ConnectivityMonitor
 import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.push.PushStatus
+import tech.whitewolf.app.subapp.Intranet
 import tech.whitewolf.app.subapp.SubAppRegistry
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -200,11 +203,29 @@ fun ShellScreen(container: AppContainer) {
         container.sessionBus.signedOut()
     }
 
+    // The way out to the rest of WhiteWolf, mirroring the WWT button the mail SPA
+    // now shows on the web (WWT-201). An external ACTION_VIEW rather than a sub-app:
+    // NavPolicy pins the WebView to the mail host, so this opens in the phone's
+    // browser and the mailbox stays exactly where it is. Sign out stays beside it —
+    // with the web's own sign-out gone, this is the only one left anywhere.
+    // Typed: the catch arm's Log.w returns Int, so inference would land on
+    // Function0<Any> and TextButton wants Function0<Unit>.
+    val openIntranet: () -> Unit = {
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Intranet.url)))
+        } catch (e: android.content.ActivityNotFoundException) {
+            android.util.Log.w("ShellScreen", "No app to open the intranet: ${Intranet.url}")
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(subApp.title) },
-                actions = { TextButton(onClick = signOut) { Text("Sign out") } },
+                actions = {
+                    TextButton(onClick = openIntranet) { Text("WWT") }
+                    TextButton(onClick = signOut) { Text("Sign out") }
+                },
             )
         }
     ) { padding ->

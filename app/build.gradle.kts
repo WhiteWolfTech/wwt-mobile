@@ -28,6 +28,9 @@ val mailBaseUrl: String = (findProperty("mailBaseUrl") as String?)
     ?.takeIf { it.isNotBlank() } ?: "https://mail.whitewolf.tech"
 val ntfyHost: String = (findProperty("ntfyHost") as String?)
     ?.takeIf { it.isNotBlank() } ?: "ntfy.whitewolf.tech"
+// Not a sub-app: the top bar's WWT action hands this to the phone's browser.
+val intranetUrl: String = (findProperty("intranetUrl") as String?)
+    ?.takeIf { it.isNotBlank() } ?: "https://intranet.whitewolf.tech"
 val oidcIssuer: String = (findProperty("oidcIssuer") as String?)
     ?.takeIf { it.isNotBlank() } ?: "https://auth.whitewolf.tech"
 val oidcClientId: String = (findProperty("oidcClientId") as String?)
@@ -52,6 +55,7 @@ android {
 
         buildConfigField("String", "MAIL_BASE_URL", "\"$mailBaseUrl\"")
         buildConfigField("String", "NTFY_HOST", "\"$ntfyHost\"")
+        buildConfigField("String", "INTRANET_URL", "\"$intranetUrl\"")
 
         // Native OIDC SSO (WWT-67): a public client against wwt-auth (Authelia).
         buildConfigField("String", "OIDC_ISSUER", "\"$oidcIssuer\"")

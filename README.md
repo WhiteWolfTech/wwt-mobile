@@ -158,9 +158,14 @@ so you can build against your own mail backend and OIDC provider without editing
 ./gradlew :app:assembleDebug \
   -PmailBaseUrl=https://mail.example.test \
   -PntfyHost=ntfy.example.test \
+  -PintranetUrl=https://intranet.example.test \
   -PoidcIssuer=https://auth.example.test \
   -PoidcClientId=my-client
 ```
+
+`intranetUrl` is the destination of the top bar's **WWT** button. It is not a
+sub-app: it is handed to the phone's browser, so point it anywhere you like — a
+host the WebView is not pinned to is exactly the point.
 
 The redirect URI (`tech.whitewolf.app:/oauth2redirect`) is not overridable — it is
 tied to `applicationId` and the AppAuth manifest placeholder, so register that same
