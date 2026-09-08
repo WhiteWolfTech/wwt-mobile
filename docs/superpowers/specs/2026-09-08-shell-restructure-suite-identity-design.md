@@ -72,11 +72,30 @@ promise — *server finishes a video, you are told, you watch it* — lands as e
 
 Both must be confirmed before implementation starts. Neither is in this repo.
 
-1. **Authelia issues refresh tokens to the public client `maileroo-mobile`.** The scope
-   becomes `openid profile email groups offline_access` (`auth/OidcAuthService.kt:45`).
-   Without refresh tokens the retained `AuthState` expires in about an hour and the silent
-   re-mint below cannot work; identity would fall back to re-authenticating interactively
-   whenever any backend session expires.
+1. **Authelia issues long-lived, rotating refresh tokens to the public client
+   `maileroo-mobile`.** Four things, not one — the client today has
+   `scopes: [openid, profile, email, groups]` and `docs/AUTH.md` states plainly "There is no
+   refresh endpoint", so all four are new:
+   - `offline_access` added to the app's scope (`auth/OidcAuthService.kt:45`) **and**
+     `refresh_token` added to the client's `grant_types`.
+   - **A refresh-token lifespan longer than the backend session it renews.** Authelia's
+     fosite defaults are on the order of 90 minutes, which would be shorter than mail's
+     7-day session and make refresh useless. This must be set per-client to at least the
+     longest backend session lifetime, and realistically 30–90 days — otherwise the launch
+     keep-alive below signs the user out on any launch after a short absence, which is far
+     worse than today's behaviour.
+   - **Rotation-on-use must be handled, not assumed away.** If refresh tokens rotate, the
+     replacement must be persisted *before* it is used, or a crash between the token
+     response and `SecureStore.putString` orphans the chain and the next refresh fails
+     `invalid_grant` — an unrecoverable sign-out from a single badly-timed kill.
+   - **The refresh-issued ID token must still carry `preferred_username` and `groups`.**
+     `internal/oidc/oidc.go` rejects a token without `preferred_username`, so a claims
+     policy that only populates it on the interactive authorization would break every
+     re-mint while looking like a backend bug.
+
+   If the lifespan or rotation requirements cannot be met, the fallback is to keep today's
+   behaviour — no refresh, and a backend 401 bounces to interactive sign-in — which costs
+   the "expiry is invisible" property but leaves the rest of this design intact.
 2. **The video backend exposes a `/api/auth/native`-shaped endpoint.** It verifies an
    Authelia ID token and returns `{ok, token, expires}`. `email-client-maileroo`'s
    `internal/oidc/native.go` already does exactly this, including the `aud == client_id`
@@ -190,10 +209,17 @@ the deep-link case require no special rule.
 | Deep-linked into a sub-app (cold or warm) | Return to launcher |
 
 **Ordering rule:** the shell's `BackHandler` (Open → Launcher) must be composed **before**
-`Content()`. `OnBackPressedDispatcher` is LIFO, so a sub-app's own handler — the WebView
-history walk today, a native list→player pop tomorrow — must be registered later to win.
-Today's handler in `ui/SubAppWebView.kt:59-61` already relies on this ordering implicitly;
-here it becomes a stated invariant.
+`Content()`. Effects register in composition order and `OnBackPressedDispatcher` dispatches
+LIFO, so a sub-app's own handler — the WebView history walk today, a native list→player pop
+tomorrow — must be registered later to win. There is no shell-level handler today, so this
+is a new invariant rather than an existing one being written down.
+
+One consequence for the error row above: `BackHandler(enabled = canGoBack)`
+(`ui/SubAppWebView.kt:59`) currently arms whenever history exists, and with retention
+`canGoBack` can be true *while the load-error screen is showing* — a main-frame error on a
+later navigation leaves earlier history intact. Back would then walk WebView history behind
+an error screen instead of returning to the launcher. Mail's composable must disable its own
+handler while `errored` is set.
 
 Predictive back is opt-in at `targetSdk 35` and the app does not currently set
 `enableOnBackInvokedCallback`. Compose's `BackHandler` is built on `OnBackPressedCallback`
@@ -252,6 +278,13 @@ Scope and lifetime:
   live DOM, in-memory inbox and `localStorage` draft under a different session cookie.
 - Exposes `discard(id)` so the existing retry path (`key(reloadKey)`, `ui/ShellScreen.kt:233`)
   still forces a genuinely fresh WebView.
+- **Destroys explicitly.** `remember` has no disposal hook, so `WebView.destroy()` must be
+  driven from a `RememberObserver` or a root `DisposableEffect` on `discard`, sign-out and
+  Activity destroy. Without it the discard-on-sign-out argument above is only a reference
+  drop and the previous user's DOM lingers until GC.
+- **Detaches before re-attaching.** `AndroidView` parents the returned view in its own
+  holder, so a second factory call must `(parent as? ViewGroup)?.removeView(it)` first or
+  Android throws "the specified child already has a parent".
 
 **`ShellScreen` splits.** The WebView load-error UI and its retry move into mail's
 content composable — a native sub-app handles its own failures. `ConnectivityMonitor` stays
@@ -298,38 +331,107 @@ own base URL from a `BuildConfig` field with a `-P` override, matching the patte
 
 - `IdentityRepository` — owns the AppAuth `AuthState`, persisted through the existing
   `SecureStore`. Behind an interface, the way `SsoLogin` already hides AppAuth from
-  `LoginViewModel`, so refresh logic stays JVM-testable.
+  `LoginViewModel`, so refresh logic stays JVM-testable. **Exactly one instance per
+  process**, and **one in-flight refresh at a time** (a mutex or a shared `Deferred`).
+  AppAuth's own `AuthState.performActionWithFreshTokens` coalesces concurrent callers on one
+  instance, but the seam that makes this testable is also what would let a hand-rolled
+  refresh path lose that guarantee — and with rotating tokens, two concurrent refreshes mean
+  the second gets `invalid_grant` and signs the user out moments after the first succeeded.
 - `BackendSession(subAppId, baseUrl)` — mints and holds one backend's opaque bearer via that
-  backend's `/api/auth/native`, and seeds cookies where the sub-app is web-hosted.
+  backend's `/api/auth/native`. Also single-flight per backend. It does **not** seed
+  cookies: that would make identity know mail is web-hosted, which is the coupling section 1
+  exists to prevent. Instead it publishes its current token as a `StateFlow`, and the
+  web-hosted sub-app seeds its own cookie from that.
 
 `TokenStore`'s fixed keys (`auth.token`, `auth.expires`) become per-sub-app.
 
+**Minting is on demand, not on entry.** `BackendSession.bearer()` mints lazily the first
+time anything asks, from any thread, using the same code path as the 401 re-mint below. This
+is not a convenience: minting "when the user opens the sub-app" deadlocks the product. Push
+registration needs a bearer (`push/PushApiClient.kt:34` returns `false` without one), video's
+primary entry is a notification, and a notification only arrives if registration succeeded —
+so a sub-app the user has never manually opened would never register, never notify, and
+never be opened. `PushReceiver` already builds the process-wide container on a background
+thread, so it can mint.
+
 **Refresh makes expiry invisible.** Today any 401 kills the session and shows the login
 screen. New rule: a 401 from a backend triggers a silent re-mint — refresh the ID token via
-`AuthState`, re-POST `/api/auth/native`, retry the call once. Only a failed *refresh* signs
-the user out. There are therefore two levels of invalidation, and conflating them is the
-mistake this design exists to avoid:
+`AuthState`, re-POST `/api/auth/native`, retry the call **once**. The single retry is what
+keeps this from looping: a re-mint that itself 401s is a terminal state for that sub-app,
+never a second refresh.
 
-- **Per-sub-app invalidation** — that backend's session is dead; re-mint it. A video 401
-  must not sign the user out of mail.
-- **Root invalidation** — the refresh itself failed; the suite signs out and
-  `SessionBus.invalidate()` shows the existing "session expired" notice.
+Which failure means what has to be exact, because this is the boundary between "the user
+notices nothing" and "the user is logged out":
+
+| Failure | Meaning | Result |
+| --- | --- | --- |
+| Backend 401, refresh succeeds, re-mint succeeds | Session aged out | Silent; retry the call once |
+| Refresh fails `invalid_grant` / `invalid_client` / `unauthorized_client` | The suite credential is dead | **Root invalidation** — sign out with the existing notice |
+| Refresh fails network / 5xx / IdP unreachable | Authelia is down, we are not signed out | **Per-sub-app failure** — that sub-app shows its error state; try again later |
+| `/api/auth/native` returns 401 with a fresh ID token | Backend cannot verify our token (JWKS, audience) | Per-sub-app **unavailable**; not a sign-out |
+| `/api/auth/native` returns 403 with a fresh ID token | Valid identity, no account on that service | Per-sub-app **unavailable**, with copy that says so |
+
+AppAuth reports refresh failures as `AuthorizationException`, not `IOException`, so the
+existing "unreachable ≠ signed out" rule has to be re-expressed in terms of the exception's
+error code rather than its type; a naive `catch (IOException)` would sign users out during
+an Authelia outage. The two per-sub-app rows above are why "only a failed refresh signs you
+out" was too coarse: a backend that rejects a *fresh* token is a service problem, not an
+identity problem.
+
+Note also that AppAuth's `getNeedsTokenRefresh()` keys off **access**-token expiry, while
+what we replay is the **ID** token. On a 401 the re-mint must force a refresh
+(`setNeedsTokenRefresh(true)`, or check the ID token's own `exp`), or it will cheerfully
+re-POST the same expired ID token and fail identically.
 
 **Validation goes lazy and per-sub-app.** Validating every backend on every resume wastes
-calls and lets a video outage bounce the user out of mail. The root identity is checked at
-launch; each sub-app validates on entry. `SessionBus.loggedIn` stops meaning "mail's token
-exists" (`AppContainer.kt:27`) and starts meaning "we hold a usable identity" — the change
-that finally decouples the shell's signed-in state from mail.
+calls and lets a video outage bounce the user out of mail. Each sub-app validates on entry.
+At launch the root identity gets a **keep-alive refresh that tolerates failure**: it renews
+the credential when it can, and a network failure or an IdP outage leaves the session
+alone — only `invalid_grant` at launch signs the user out. `SessionBus.loggedIn` stops
+meaning "mail's token exists" (`AppContainer.kt:27`) and starts meaning "we hold a usable
+identity" — the change that finally decouples the shell's signed-in state from mail.
 
-The existing rule that **only a 401 signs you out** is preserved throughout: `IOException`,
-DNS failure and 5xx leave every session intact (`auth/AuthRepository.kt:76-79`).
+**A re-minted session must reach the WebView.** This is the failure mode that makes the
+whole re-mint path worse than useless if it is skipped. The mail SPA probes `/api/me` on
+load and renders **its own** login form whenever that probe fails
+(`email-client-maileroo/web/src/App.tsx:78,127`), and it does not re-probe when the cookie
+changes. So the sequence "cold start with a server-revoked token → SPA shows its login card
+→ shell validates → 401 → silent re-mint → cookie fixed" ends with the user staring at a
+login form inside a shell that believes it is signed in. Today that same case bounces to the
+native login and a fresh WebView is built on re-login, so the user recovers; the silent path
+would strand them.
 
-**Sign-out spans both backends.** Order still matters — unregister push per sub-app using
-live bearers, then clear sessions, cookies, `AuthState`, and the retained sub-app scopes,
-then flip the bus. The existing `beginSignOut`/`endSignOut` gate must wrap the **whole**
-multi-service teardown, and `endSignOut` must run in a `finally`: a 401 from the second
-backend's unregister would otherwise surface "your session expired" on a deliberate
-sign-out, which is precisely the bug `auth/SessionBus.kt` was written to prevent.
+The fix is the `StateFlow` above: `MailSubApp` observes its `BackendSession` token, seeds
+the cookie, and **reloads** the retained WebView whenever the token changes.
+`wwtWake()` is not sufficient — once the SPA has flipped to its unauthenticated view there
+is no mail list to refresh — so this is a `loadUrl`, not a wake. The first load of a sub-app
+is likewise gated on a validated session rather than racing it.
+
+**Sign-out spans both backends, and must fence the re-mint path.** Order still matters —
+unregister push per sub-app using live bearers, then clear sessions, cookies, `AuthState`,
+and the retained sub-app scopes, then flip the bus. The existing `beginSignOut`/`endSignOut`
+gate must wrap the **whole** multi-service teardown, and `endSignOut` must run in a
+`finally`: a 401 from the second backend's unregister would otherwise surface "your session
+expired" on a deliberate sign-out, which is precisely the bug `auth/SessionBus.kt` was
+written to prevent.
+
+But suppressing the *notice* is no longer enough, and this is a security requirement rather
+than a UX one. Sign-out runs on its own thread (`ui/ShellScreen.kt:178-201`) while
+`PushReceiver` can be registering on another. Under the new rule that a 401 triggers a
+refresh and a re-mint, that in-flight registration's 401 would mint a **fresh multi-day
+session and cookie** — which can land *after* `logout()` cleared them, leaving a usable
+bearer on the device with the login screen showing.
+
+So identity carries a **generation counter**, incremented on every sign-out and
+invalidation. `BackendSession` captures the generation when a mint begins and discards the
+result if it no longer matches, and `beginSignOut` vetoes new mints outright rather than
+only silencing their notices. A late mint becomes a no-op instead of a resurrection.
+
+Because the refresh token is now a long-lived suite-wide credential rather than a
+seven-day per-service one, sign-out should also **revoke it at Authelia** where the
+provider exposes a revocation endpoint. Local teardown alone leaves a valid credential in
+the IdP's store. (This is revocation of our own token, not RP-initiated logout — the
+non-goal above still stands: the user's browser session is untouched.)
 
 ### 4. Push routing
 
@@ -355,18 +457,30 @@ channel id is `SubAppId.value`, replacing the hardcoded `"mail"`
 collapsing notification, while video wants several ready videos to stack, and each sub-app
 owns that policy rather than a shared `Notifications` object knowing both.
 
-**Wake routing.** `WakeBus` gains a `SubAppId` key, so a video wake cannot refresh mail. The
-existing `StateFlow` shape handles the awkward case for free: a tick for a sub-app that is
-not currently composed is observed when the user next opens it, because the flow holds the
-latest value and `LaunchedEffect(tick, pageLoaded)` already re-evaluates on load
-(`ui/SubAppWebView.kt:66-70`). The background-wake `pending` flag becomes per-sub-app too.
+**Wake routing.** `WakeBus` gains a `SubAppId` key, so a video wake cannot refresh mail. A
+tick for a sub-app that is not currently composed is observed when the user next opens it,
+because the flow holds the latest value and `LaunchedEffect(tick, pageLoaded)` already
+re-evaluates on load (`ui/SubAppWebView.kt:66-70`).
+
+**Every wake bumps the tick — including the notify path — and `pending` is deleted.** Today
+`signalWakeBackground()` sets `pending` without touching the tick, and `pending` is consumed
+only on `ON_RESUME` (`ui/SubAppWebView.kt:77-85`). That is sound while there is one sub-app,
+because reaching it always involves resuming the Activity. It breaks the moment the rule
+below sends a notification while the app is foreground in a *different* sub-app: the user
+taps launcher → mail, no `ON_RESUME` fires because the Activity never stopped, the tick
+never moved, and they read a stale inbox. Keeping one keyed tick for both arms removes the
+whole class of bug; sub-apps consume it gated on `RESUMED` (`repeatOnLifecycle`) so nothing
+refreshes from the background.
 
 **The foreground rule is refined.** `wakeAction(isForeground)` (`push/WakeBus.kt:11-12`)
 today means foreground → refresh silently, background → notify. With two sub-apps,
 "foreground" now includes "the user is watching a video when mail arrives", where a silent
 refresh is invisible and the user never learns they have mail. The rule becomes: **notify
-unless the target sub-app is the visible route.** `WwtApp.isForeground` is therefore joined
-by the current route, read from `ShellViewModel`.
+unless the target sub-app is the visible route.** The visible route is therefore an input to
+`wakeAction`, and it must be published to a **process-scoped** holder on `WwtApp` alongside
+`ForegroundTracker` — written on route change, cleared on stop. It cannot be read from
+`ShellViewModel`: `PushReceiver` is a manifest-registered `BroadcastReceiver` with no
+Activity and no access to Activity-scoped state.
 
 **Notification taps carry a deep link as intent data, not extras.**
 `push/Notifications.kt:43` builds its `PendingIntent` with request code `0` and
@@ -381,28 +495,59 @@ than being replaced by last-used.
 **Push health stays global.** `PushStatus` is a statement about the distributor, which is
 shared across instances, so `PushStatusBus` and the banner are unchanged.
 
+**Someone has to decode the payload, and it must not be the shell.** Today's wake body is
+`{"type":"new_mail"}` (`email-client-maileroo/internal/push/notifier.go`) and is ignored
+entirely; it carries no item id. `SubAppPush` therefore gains
+`decode(ByteArray): WakePayload?`, so each sub-app owns its own wire format and the receiver
+stays generic. The alternative — one suite-wide payload schema fixed in `docs/PUSH.md` — is
+also acceptable, but it must be one or the other; leaving it unstated puts every sub-app's
+wire format inside `PushReceiver`.
+
 **The privacy stance is preserved, not traded.** `docs/PUSH.md` states that the push carries
 no content, and `push/Notifications.kt` posts a deliberately generic "New mail". A
 video-ready notification wants a title and a thumbnail. The resolution: the *push payload*
 stays content-free — the wake carries only an item id — and the app fetches the title and
-thumbnail from the video backend with its live bearer before posting the notification,
-falling back to generic copy when that fetch fails or the device is offline. The
-notification gets richer, ntfy learns nothing, and the documented guarantee survives intact.
+thumbnail from the video backend with its live bearer.
+
+That fetch must **not** block the notification. `MessagingReceiver.onReceive` calls
+`onMessage` synchronously inside a broadcast with a budget of roughly ten seconds, and the
+fetch may itself trigger a re-mint. So: post the generic notification **immediately**, then
+re-post with the same notification id to replace it once enrichment lands, and keep the
+generic one when the fetch fails or the device is offline. The notification gets richer, it
+is never delayed or lost, ntfy learns nothing, and the documented guarantee survives intact.
 `docs/PUSH.md` is updated to say this explicitly.
+
+**Per-sub-app channels change the "notifications blocked" check.**
+`areWwtNotificationsEnabled` (`ui/ShellScreen.kt:259-264`) inspects the single
+`Notifications.CHANNEL_ID`. With one channel per sub-app, blocked-ness is per channel: the
+banner reports a problem when the app-level toggle is off, or when the channel belonging to
+a registered sub-app is blocked.
 
 ## Error handling / edge cases
 
-- **Refresh fails mid-session** → root invalidation, existing "session expired" notice.
+- **Refresh fails `invalid_grant`** → root invalidation, existing "session expired" notice.
+- **Refresh fails network / 5xx (IdP outage)** → nobody is signed out; the affected sub-app
+  shows its error state and retries later.
 - **One backend down, the other up** → only the affected sub-app shows its error state;
   the launcher and the other sub-app are unaffected. Not signed out (non-401).
+- **`/api/auth/native` rejects a fresh ID token (401/403)** → that sub-app is unavailable,
+  with copy distinguishing "cannot verify" from "no account on this service". Never a
+  sign-out: the identity is fine, the service is not.
+- **Two backends 401 at once** → single-flight refresh means exactly one token request; the
+  second mint waits on it rather than racing it into `invalid_grant`.
 - **Deep link to an unknown `SubAppId`** → ignored, app opens to last-used. A future build's
   notification must not crash an older shell.
-- **Deep link while signed out** → held until sign-in completes, then applied.
-- **Notification tap for a sub-app whose session is dead** → sub-app opens, validates on
-  entry, silently re-mints; the user sees a load, not a bounce to login.
-- **Sign-out while a push registration is in flight** → the `beginSignOut` gate suppresses
-  the resulting 401 notice; `endSignOut` runs in a `finally` so a throwing teardown cannot
-  leave the gate raised and mute every real expiry notice thereafter.
+- **Deep link while signed out** → held in `SavedStateHandle` until sign-in completes, then
+  applied; a process death during the Custom Tab sign-in must not lose it.
+- **Deep link re-delivered after process death** → `getIntent()` returns the same data URI,
+  so consumption is recorded and the link fires once, not on every restore.
+- **Notification tap for a sub-app whose session is dead** → sub-app opens, mints on demand,
+  and (for a web sub-app) reloads once the new token lands; the user sees a load, not a
+  bounce to login and not a stranded SPA login form.
+- **Sign-out while a push registration is in flight** → `beginSignOut` vetoes new mints and
+  the generation counter discards any that completes late, so no session outlives the
+  teardown; `endSignOut` runs in a `finally` so a throwing teardown cannot leave the gate
+  raised and mute every real expiry notice thereafter.
 - **Distributor missing or on the wrong server** → unchanged; existing `PushStatus` banner
   and `reregister()` behavior, now looped over instances.
 - **Process death while in a sub-app** → route restored from `SavedStateHandle`; content is
@@ -417,21 +562,44 @@ JVM unit tests (the existing `app/src/test` idiom — pure logic behind seams):
   unknown-id inputs.
 - `wakeAction` with the new visible-route argument: the four combinations of
   foreground/background × target-visible/not.
-- Keyed `WakeBus`: a tick for one sub-app does not reach another; pending is per-sub-app.
-- Refresh-on-401: one retry after a successful re-mint; no retry loop when the re-mint
-  fails; root invalidation only on refresh failure.
-- Per-sub-app vs root invalidation: a video 401 leaves mail's session intact.
-- Sign-out teardown: ordering (unregister before clear), and `endSignOut` running after a
-  throwing teardown.
+- Keyed `WakeBus`: a tick for one sub-app does not reach another; **both** the notify and
+  the silent arm bump the tick.
+- Refresh-on-401: exactly one retry after a successful re-mint, and a re-mint that itself
+  401s terminates rather than refreshing again.
+- The failure taxonomy, one case per row of the table in section 3: `invalid_grant` → root
+  invalidation; network/5xx during refresh → no sign-out; `/api/auth/native` 401 and 403
+  with a fresh token → sub-app unavailable, session intact.
+- Single-flight: two concurrent 401s from different backends produce exactly one token
+  refresh.
+- Mint-on-demand: a bearer is available to push registration for a sub-app that has never
+  been opened.
+- Sign-out teardown: ordering (unregister before clear); `endSignOut` running after a
+  throwing teardown; and a mint that completes *after* sign-out is discarded by the
+  generation counter.
+- Deep link: parsed once, consumed once, held across sign-in.
 - `MailWebSession` listener rebinding: state primed on attach, no writes from an unbound
-  listener.
+  listener. This requires splitting the listener/state logic behind an interface over the
+  WebView — as written the class holds `WebView` and `SwipeRefreshLayout` and is
+  instrumented-only.
 
 Instrumented tests (`app/src/androidTest`):
 
 - Launcher renders one tile per registry entry; tapping opens that sub-app.
 - Back from a sub-app returns to the launcher; back from the launcher exits.
-- `ShellFlowTest.kt:14` retargets from the `submit` tag to `sso` — it will otherwise fail
-  the moment password login is deleted.
+- A re-minted session reloads the mail WebView rather than leaving the SPA's own login form
+  on screen.
+
+Retiring password login touches more of the suite than one assertion:
+`ShellFlowTest.kt:14` retargets from `submit` to `sso`; `LoginScreenTest` loses its
+email/password interactions; `LoginViewModelTest` loses its `submit()`/`InvalidCredentials`
+cases; and `AuthRepositoryTest`'s `login()` coverage is replaced by the SSO and re-mint
+paths.
+
+**Instrumented tests need a way to be signed in.** Today a test can seed a bearer directly;
+under this design a usable session also needs a refresh token, so `AppContainer` must expose
+a test-only `IdentityRepository` seam that can be given a canned identity. Without it every
+signed-in instrumented test requires a live interactive OIDC flow, which is not runnable in
+CI.
 
 Note that no WebView tests exist today (only `auth/SetCookieTest.kt` touches that area), so
 retention behavior has no existing coverage to inherit and needs the unit tests above plus
@@ -440,17 +608,31 @@ manual verification on a device.
 ## Migration and release
 
 - **Every user re-authenticates once.** Retiring password login forces it, so the legacy
-  `auth.token` / `auth.expires` keys are simply cleared on first run of the new build. No
-  migration code.
-- Push re-registers under a named instance on first run; the old default-instance
-  registration is unregistered during that first pass so the backend does not accumulate a
-  dead endpoint.
+  `auth.token` / `auth.expires` keys are cleared on first run of the new build.
+- **The legacy push endpoint must be retired before that clear, or not at all.**
+  Unregistering it needs the legacy bearer, and the backend only prunes an endpoint when the
+  push server returns 404/410 — which ntfy does not do for an unsubscribed topic, so a dead
+  row would sit in the registry forever. First run therefore does, in this order: if a
+  legacy token and endpoint both exist, `POST /api/push/unregister` with the legacy bearer,
+  then `UnifiedPush.unregisterApp(ctx)` for the default instance, then clear the legacy
+  keys. This is the one piece of genuine migration code; it is deletable a release later.
+- `unregisterApp(ctx, instance)` drops the saved distributor once the last instance goes, so
+  `reregister()` must unregister **all** instances and then call `enable()` — which only
+  re-saves the distributor when exactly one is installed. Existing behaviour, now on a wider
+  path.
 - The registry ships with one entry (mail) until project B, so the launcher shows a single
   tile and cold start goes straight to mail. The restructure is therefore releasable on its
   own, and behaviour for a mail-only user is unchanged apart from sign-in and one extra back
   press.
 - `README.md` sign-in section and `docs/PUSH.md` are updated in the same PR: SSO-only
   sign-in, per-sub-app push instances, and the content-free-payload clarification.
+  `SECURITY.md` and the paired repo's `docs/AUTH.md` change too — the device now stores a
+  long-lived suite-wide refresh token rather than a seven-day per-service bearer, and
+  `AUTH.md`'s "there is no refresh endpoint" is no longer true.
+- **Contributors pointing a build at their own backend now also need an OIDC provider.**
+  With password login gone, `-PmailBaseUrl` alone is not enough: `/api/auth/native` requires
+  the backend to be configured with a native client, so `CONTRIBUTING.md` and the README's
+  override section must say that an Authelia (or equivalent) is part of the minimum setup.
 
 ## Decisions recorded
 
@@ -466,3 +648,8 @@ manual verification on a device.
 | `remember`-scoped retention | Activity `ViewModel` + `MutableContextWrapper` | Rotation already reloads today, so only the in-Activity round-trip needs solving; the wrapper adds leak surface for a problem that does not exist |
 | Per-sub-app UnifiedPush instances | A suite-wide push registry service | The connector already supports instances and already reports them; each backend keeps its own endpoint |
 | Content-free push payload, app-side enrichment | Putting the video title in the push | Preserves the documented guarantee that the push server never sees content |
+| Mint backend sessions on demand | Mint on sub-app entry | Entry-minting deadlocks push: a sub-app reached only by notification never registers, so it never notifies, so it is never entered |
+| Generation-fenced sign-out | The `beginSignOut` notice gate alone | The gate suppresses the notice but not the mint; an in-flight 401 could re-mint a live session after teardown |
+| Identity publishes a token `StateFlow`; the sub-app seeds its own cookie and reloads | `BackendSession` seeds cookies directly | Keeps identity ignorant of mail being web-hosted, and a silent re-mint that never reloads strands the user on the SPA's own login form |
+| One keyed tick for both wake arms | Keeping a separate per-sub-app `pending` flag | `pending` is consumed on `ON_RESUME`, which never fires when the user reaches a sub-app from the launcher inside a resumed Activity |
+| Post the generic notification, then replace it when enrichment lands | Fetching title and thumbnail before posting | A synchronous broadcast has ~10s; a slow fetch would delay or lose the notification entirely |
