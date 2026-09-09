@@ -1,10 +1,8 @@
 package tech.whitewolf.app.ui
 
-import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.app.NotificationManagerCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,22 +18,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.delay
 import tech.whitewolf.app.AppContainer
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
-import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
-import tech.whitewolf.app.push.PushStatus
 import tech.whitewolf.app.subapp.SubAppRegistry
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,25 +72,9 @@ fun ShellScreen(container: AppContainer) {
     BackHandler(enabled = route is ShellRoute.Open) { vm.toLauncher() }
 
     val pushManager = remember { PushManager(context.applicationContext) }
-    val pushStatusBus = remember { WwtApp.from(context).pushStatusBus }
-    val pushStatus by pushStatusBus.status.collectAsState()
-    var notificationsEnabled by remember { mutableStateOf(true) }
-
-    // Re-drive push status from the current distributor state; also refresh whether WWT
-    // can actually show notifications. Used on entry, resume, and the periodic poll.
-    // forceFresh (resume only): in WrongServer, re-register from scratch — ntfy pins a
-    // registration to the server that was its default when the registration was created,
-    // so a plain register returns the stale endpoint forever after the user fixes the
-    // server. unregister+register makes ntfy issue a fresh one against its current server.
-    val recheck: (Boolean) -> Unit = { forceFresh ->
-        notificationsEnabled = areWwtNotificationsEnabled(context)
-        when {
-            !pushManager.hasDistributor() -> pushStatusBus.set(PushStatus.NoDistributor)
-            forceFresh && pushStatusBus.status.value is PushStatus.WrongServer ->
-                pushManager.reregister()
-            else -> pushManager.enable()
-        }
-    }
+    val pushHealth = rememberPushHealth(container, pushManager)
+    val pushStatus = pushHealth.status
+    val notificationsEnabled = pushHealth.notificationsEnabled
 
     // Ask the server whether the stored bearer is still accepted. The local expiry check
     // can say "valid" long after the backend revoked it — a token_version bump invalidates
@@ -107,48 +84,19 @@ fun ShellScreen(container: AppContainer) {
     // Runs off the main thread: OkHttp on the UI thread would throw.
     val validateSession: () -> Unit = { Thread { container.auth.validate() }.start() }
 
-    LaunchedEffect(Unit) { recheck(false); validateSession() }
+    LaunchedEffect(Unit) { validateSession() }
 
-    // Liveness on resume: catches a distributor installed/removed/reconfigured while the
-    // app was backgrounded (the common "went to fix it, came back" path), and a session
-    // revoked while we were away.
+    // Liveness on resume: catches a session revoked while we were away. Push health (distributor
+    // installed/removed/reconfigured) is handled by rememberPushHealth.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                recheck(true)
                 validateSession()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    // State-entry trigger for the fresh re-registration: on a cold start the stale
-    // endpoint arrives AFTER the resume replay has already run (the process-fresh bus
-    // still held Ok at that instant), so the resume path alone never re-registers.
-    // Fires once whenever status BECOMES WrongServer; bounded because a still-wrong
-    // server returns an equal WrongServer(host) — StateFlow dedupes it and an unchanged
-    // key does not restart this effect. The resume trigger still covers "fixed while
-    // away", where the value never changes.
-    LaunchedEffect(pushStatus) {
-        if (pushStatus is PushStatus.WrongServer) pushManager.reregister()
-    }
-
-    // Periodic liveness while a problem banner is up and the app is foreground: catches a
-    // distributor installed/reconfigured without the app ever backgrounding (e.g.
-    // split-screen install). Keyed on isProblem so the loop exists only in a problem
-    // state and cancels the moment status reaches Ok; each tick is gated on RESUMED so
-    // nothing runs in the background.
-    val isProblem = pushStatus !is PushStatus.Ok || !notificationsEnabled
-    LaunchedEffect(isProblem) {
-        if (!isProblem) return@LaunchedEffect
-        while (true) {
-            delay(30_000)
-            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                recheck(false)
-            }
-        }
     }
 
     val signOut = {
@@ -226,17 +174,6 @@ internal fun titleFor(route: ShellRoute, registry: SubAppRegistry): String = whe
     is ShellRoute.Open -> registry.byId(route.id)?.ui?.title ?: "WWT"
 }
 
-/**
- * True when WWT can actually show notifications: app-level enabled AND the Mail channel
- * not blocked. A channel that doesn't exist yet counts as enabled (it is created on the
- * first notification).
- */
-private fun areWwtNotificationsEnabled(context: Context): Boolean {
-    val nm = NotificationManagerCompat.from(context)
-    if (!nm.areNotificationsEnabled()) return false
-    val channel = nm.getNotificationChannel(Notifications.CHANNEL_ID)
-    return channel == null || channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
-}
 
 /** Copy for the login screen when the server invalidated our token (WWT-57). Null on a
  *  deliberate sign-out — the user knows why they are there. */
