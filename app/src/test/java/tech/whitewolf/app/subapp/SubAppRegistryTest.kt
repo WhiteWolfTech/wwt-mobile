@@ -14,8 +14,8 @@ class SubAppRegistryTest {
         assertEquals(mail, all.first())
     }
 
-    @Test fun subAppExposesHostFromUrl() {
-        val s = SubApp(id = "x", title = "X", url = "https://mail.whitewolf.tech/inbox")
+    @Test fun mailTargetExposesHostFromUrl() {
+        val s = MailTarget(id = "x", title = "X", url = "https://mail.whitewolf.tech/inbox")
         assertEquals("mail.whitewolf.tech", s.host)
     }
 

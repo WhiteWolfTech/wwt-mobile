@@ -8,8 +8,9 @@ import tech.whitewolf.app.BuildConfig
  * launcher UI exists (2+ sub-apps).
  */
 object SubAppRegistry {
-    private val mail = SubApp(id = "mail", title = "Mail", url = BuildConfig.MAIL_BASE_URL)
+    private val mail = MailTarget(id = "mail", title = "Mail", url = BuildConfig.MAIL_BASE_URL)
 
-    fun all(): List<SubApp> = listOf(mail)
-    fun default(): SubApp = all().first()
+    fun all(): List<MailTarget> = listOf(mail)
+    fun default(): MailTarget = all().first()
 }
+

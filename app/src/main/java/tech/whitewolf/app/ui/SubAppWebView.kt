@@ -28,7 +28,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.sessionCookieLine
-import tech.whitewolf.app.subapp.SubApp
+import tech.whitewolf.app.subapp.MailTarget
 import tech.whitewolf.app.web.NavPolicy
 import tech.whitewolf.app.web.ShellBridge
 
@@ -41,7 +41,7 @@ private const val REFRESH_SPINNER_MS = 800L
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun SubAppWebView(
-    subApp: SubApp,
+    subApp: MailTarget,
     sessionToken: String?,
     onPageError: () -> Unit,
     onPageLoaded: () -> Unit,
