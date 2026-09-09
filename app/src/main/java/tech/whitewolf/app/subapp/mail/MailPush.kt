@@ -17,9 +17,14 @@ import tech.whitewolf.app.subapp.WakePayload
  * One collapsing notification: mail says "you have mail", not "you have these mails", so
  * a single stable id is right. A sub-app that wants several to stack (video) derives its
  * id from the item instead.
+ *
+ * [id] is CONSTRUCTED in (from `MailSubApp.ID` — see `AppContainer`) rather than declared
+ * here, so mail's id has exactly one definition. Before this, `MailSubApp` and `MailPush`
+ * each declared their own `SubAppId("mail")` literal; a rename to one without the other
+ * would have routing use one id while a tapped notification's target used the other,
+ * surfacing only as "tapping the notification opens nothing" on a device.
  */
-class MailPush : SubAppPush {
-    private val id = SubAppId("mail")
+class MailPush(private val id: SubAppId) : SubAppPush {
     override val channelId = id.value
     override val channelName = "Mail"
     override val channelDescription = "New mail notifications"
@@ -47,6 +52,13 @@ class MailPush : SubAppPush {
         )
     }
 
+    // Uses payload.subAppId — the id it is GIVEN — rather than the constructor's own
+    // `id` field: this is the same routing decision `decode()` already made when it
+    // built the WakePayload notify() was called with, so tapTarget must not silently
+    // repeat that decision from a second, independently-drifting source of truth. Today
+    // that is always this instance's own `id` (mail decodes only its own payloads), but
+    // the two are no longer assumed equal here. Still drops any item id: mail's tap
+    // target never carries one.
     override fun tapTarget(payload: WakePayload): String =
-        DeepLink.buildString(WakePayload(id, null))
+        DeepLink.buildString(WakePayload(payload.subAppId, null))
 }

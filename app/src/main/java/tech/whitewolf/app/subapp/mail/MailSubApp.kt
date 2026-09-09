@@ -43,9 +43,17 @@ class MailSubApp(
     private val token: () -> String?,
     private val online: () -> StateFlow<Boolean>,
 ) : SubApp {
-    override val id = SubAppId("mail")
+    override val id = ID
     override val title = "Mail"
     override val icon: ImageVector = Icons.Filled.Email
+
+    companion object {
+        /** Mail's id: the one definition, so nothing else declares its own `SubAppId("mail")`
+         *  literal. `MailPush` takes it as a constructor argument (see `AppContainer`) rather
+         *  than redeclaring it — a future rename here would otherwise leave routing and the
+         *  notification's tap target pointed at two different ids with no compiler to catch it. */
+        val ID = SubAppId("mail")
+    }
 
     @Composable
     override fun Content(host: SubAppHost, modifier: Modifier) {

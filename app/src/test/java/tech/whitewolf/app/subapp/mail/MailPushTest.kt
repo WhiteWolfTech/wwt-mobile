@@ -8,7 +8,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MailPushTest {
-    private val push = MailPush()
+    private val push = MailPush(SubAppId("mail"))
 
     @Test fun channelIdIsTheSubAppId() {
         assertEquals("mail", push.channelId)
@@ -36,5 +36,17 @@ class MailPushTest {
             WakePayload(SubAppId("mail"), null),
             DeepLink.parseString(push.tapTarget(WakePayload(SubAppId("mail")))),
         )
+    }
+
+    @Test fun tapTargetUsesTheGivenPayloadsIdRatherThanItsOwnConstructorId() {
+        // Pins the Finding 2 fix: tapTarget() used to ignore its argument entirely and
+        // rebuild a WakePayload from this instance's own private `id` field. That meant
+        // a rename that changed MailSubApp's id without also changing whatever id this
+        // instance was constructed with would have routing use one id while a tapped
+        // notification's target silently used the other. Constructing with a
+        // DIFFERENT id than the payload proves tapTarget reads the payload, not `this`.
+        val otherId = SubAppId("otherid")
+        val p = MailPush(SubAppId("mail"))
+        assertEquals("wwt://subapp/$otherId", p.tapTarget(WakePayload(otherId)))
     }
 }

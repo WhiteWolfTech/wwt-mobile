@@ -70,19 +70,18 @@ class AppContainer(context: Context) {
 
     val lastUsedStore = LastUsedStore(AndroidPrefs(context.applicationContext))
 
-    // The ordered suite.
+    // The ordered suite. mailSubApp is built first and its `id` handed to MailPush —
+    // not a second `SubAppId("mail")` literal — so the two can never drift apart (see
+    // MailSubApp.ID's KDoc).
+    private val mailSubApp = MailSubApp(
+        url = mail.url,
+        scopes = scopes,
+        token = { auth.currentToken() },
+        online = { connectivity.online },
+    )
+
     val registry = SubAppRegistry(
-        listOf(
-            SubAppEntry(
-                ui = MailSubApp(
-                    url = mail.url,
-                    scopes = scopes,
-                    token = { auth.currentToken() },
-                    online = { connectivity.online },
-                ),
-                push = MailPush(),
-            ),
-        ),
+        listOf(SubAppEntry(ui = mailSubApp, push = MailPush(mailSubApp.id))),
     )
 
     // One PushApiClient per sub-app instance — the UnifiedPush side already registers one
