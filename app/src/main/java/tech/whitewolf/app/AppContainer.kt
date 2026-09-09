@@ -14,6 +14,7 @@ import tech.whitewolf.app.net.ConnectivityMonitor
 import tech.whitewolf.app.subapp.SubAppEntry
 import tech.whitewolf.app.subapp.SubAppRegistry
 import tech.whitewolf.app.subapp.SubAppScopes
+import tech.whitewolf.app.subapp.mail.MailPush
 import tech.whitewolf.app.subapp.mail.MailSubApp
 import tech.whitewolf.app.subapp.mailTarget
 import tech.whitewolf.app.ui.AndroidPrefs
@@ -72,8 +73,7 @@ class AppContainer(context: Context) {
 
     val lastUsedStore = LastUsedStore(AndroidPrefs(context.applicationContext))
 
-    // The ordered suite. `push = null` for mail is temporary: nothing implements
-    // SubAppPush for it yet (that lands with MailPush).
+    // The ordered suite.
     val registry = SubAppRegistry(
         listOf(
             SubAppEntry(
@@ -83,7 +83,7 @@ class AppContainer(context: Context) {
                     token = { auth.currentToken() },
                     online = { connectivity.online },
                 ),
-                push = null,
+                push = MailPush(),
             ),
         ),
     )
