@@ -2,36 +2,42 @@ package tech.whitewolf.app.push
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import tech.whitewolf.app.subapp.SubAppId
+import java.util.concurrent.ConcurrentHashMap
 
-/** What to do with a wake-up, decided purely from the app's foreground state. */
+/** What to do with a wake-up. */
 enum class WakeAction { Foreground, Background }
 
-/** Foreground → refresh live (bump tick); background → notify + pending. */
-fun wakeAction(foreground: Boolean): WakeAction =
-    if (foreground) WakeAction.Foreground else WakeAction.Background
+/**
+ * Refresh silently only when the user is actually looking at the sub-app the wake is
+ * for. "App is foreground" is not enough once there are two sub-apps: mail arriving
+ * while the user watches a video would refresh an off-screen mailbox and tell them
+ * nothing.
+ */
+fun wakeAction(appForeground: Boolean, targetIsVisible: Boolean): WakeAction =
+    if (appForeground && targetIsVisible) WakeAction.Foreground else WakeAction.Background
 
 /**
- * Process-scoped wake signal. Level-triggered ("something changed, refetch") and
- * data-free. `tick` drives a live refresh while the app is foregrounded; `pending`
- * carries a wake that arrived while backgrounded until the next foreground resume.
- * In-memory only — never persisted (a dead process cold-starts fresh anyway).
+ * Process-scoped, per-sub-app wake signal. Level-triggered ("something changed, refetch")
+ * and data-free.
+ *
+ * There is deliberately no separate `pending` flag. It was consumed only on ON_RESUME,
+ * which does not fire when the user reaches a sub-app from the launcher inside an
+ * already-resumed Activity — so a notified wake left the target stale. A StateFlow tick
+ * covers both arms: a sub-app that is not composed observes the latest value when it next
+ * composes, and consumers gate on RESUMED so nothing refreshes from the background.
  */
 class WakeBus {
-    private val _tick = MutableStateFlow(0L)
-    val tick: StateFlow<Long> = _tick
+    private val ticks = ConcurrentHashMap<SubAppId, MutableStateFlow<Long>>()
 
-    @Volatile private var pending = false
+    private fun flow(id: SubAppId): MutableStateFlow<Long> =
+        ticks.computeIfAbsent(id) { MutableStateFlow(0L) }
 
-    /** Foreground wake: refresh now. Bumps the tick; sets no pending. */
-    fun signalWakeForeground() { _tick.value = _tick.value + 1 }
+    fun tick(id: SubAppId): StateFlow<Long> = flow(id)
 
-    /** Background wake: refresh on return. Sets pending; does not bump the tick. */
-    @Synchronized fun signalWakeBackground() { pending = true }
-
-    /** Returns whether a background wake is pending, clearing it. */
-    @Synchronized fun consumePending(): Boolean {
-        val p = pending
-        pending = false
-        return p
+    /** A wake arrived for [id], whether or not it also raised a notification. */
+    fun signal(id: SubAppId) {
+        val f = flow(id)
+        synchronized(f) { f.value = f.value + 1 }
     }
 }

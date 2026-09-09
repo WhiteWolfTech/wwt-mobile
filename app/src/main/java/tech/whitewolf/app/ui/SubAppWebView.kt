@@ -19,16 +19,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.MailTarget
+import tech.whitewolf.app.subapp.SubAppId
 import tech.whitewolf.app.web.NavPolicy
 import tech.whitewolf.app.web.ShellBridge
 
@@ -51,7 +49,7 @@ fun SubAppWebView(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var pageLoaded by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
-    val tick by wakeBus.tick.collectAsState()
+    val tick by wakeBus.tick(SubAppId("mail")).collectAsState()
 
     // System back walks the WebView history (the SPA creates real entries for
     // thread/compose navigation and seeds a base entry under deep links). At
@@ -60,29 +58,17 @@ fun SubAppWebView(
         webView?.goBack()
     }
 
-    // Foreground wake: a tick that arrives while the app is open refreshes the SPA
-    // once the page is ready. StateFlow holds the latest tick, so a wake landing
-    // before load is applied when pageLoaded flips true (no missed wake). tick starts at 0.
+    // A tick covers both arms (foreground refresh and a wake that also notified): it
+    // refreshes the SPA once the page is ready, whether the wake arrived while this
+    // composable was on screen or the user only reaches it afterwards (e.g. from the
+    // launcher, with no ON_RESUME in between). StateFlow holds the latest tick, so a
+    // wake landing before load is applied when pageLoaded flips true. tick starts at 0.
     LaunchedEffect(tick, pageLoaded) {
         if (pageLoaded && tick > 0L) {
             webView?.evaluateJavascript(WAKE_JS, null)
         }
     }
 
-    // Background wake: consumed once on the next resume, after the page is ready.
-    // Keyed ONLY on lifecycleOwner — the observer reads pageLoaded/webView live at
-    // event time. It must NOT re-key on pageLoaded: that would dispose+recreate the
-    // effect on the first page load, and the onDispose below would null the WebView.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && pageLoaded && wakeBus.consumePending()) {
-                webView?.evaluateJavascript(WAKE_JS, null)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
     // Clear the WebView reference only when the composable truly leaves composition.
     DisposableEffect(Unit) {
         onDispose { webView = null }

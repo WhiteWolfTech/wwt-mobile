@@ -7,9 +7,9 @@ import org.unifiedpush.android.connector.MessagingReceiver
  * Receives UnifiedPush events. The registration network call runs off the main
  * thread on a background Thread, kept alive past the broadcast return by
  * goAsync()/PendingResult.finish() so it can't be killed mid-flight. A new
- * endpoint is sent to the backend. Each wake-up either refreshes the mailbox
- * silently (app foregrounded → WakeBus tick) or posts a generic "New mail"
- * notification and a pending wake (app backgrounded).
+ * endpoint is sent to the backend. Every wake-up bumps the mail sub-app's
+ * WakeBus tick; it also posts a generic "New mail" notification unless the
+ * mailbox is what's currently on screen.
  */
 class PushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
@@ -35,17 +35,15 @@ class PushReceiver : MessagingReceiver() {
         }.start()
     }
 
+    // Task 13 replaces this with the registry-driven version.
     override fun onMessage(context: Context, message: ByteArray, instance: String) {
         val app = tech.whitewolf.app.WwtApp.from(context)
-        when (wakeAction(app.isForeground)) {
-            // Foreground: the user is looking at the app — refresh the mailbox
-            // silently, no notification.
-            WakeAction.Foreground -> app.wakeBus.signalWakeForeground()
-            // Background: notify, and remember to refresh when the app returns.
-            WakeAction.Background -> {
-                Notifications.showNewMail(app)
-                app.wakeBus.signalWakeBackground()
-            }
+        val id = tech.whitewolf.app.subapp.SubAppId("mail")
+        app.wakeBus.signal(id)
+        // No VisibleRoute yet (Task 12): "app is foreground" is the best available proxy and
+        // preserves today's behaviour exactly while there is only one sub-app.
+        if (wakeAction(app.isForeground, targetIsVisible = app.isForeground) == WakeAction.Background) {
+            Notifications.showNewMail(app)
         }
     }
 
