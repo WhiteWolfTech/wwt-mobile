@@ -102,33 +102,6 @@ fun rememberPushHealth(container: AppContainer, pushManager: PushManager): PushH
 }
 
 /**
- * True when WWT can actually show notifications: app-level enabled AND no REGISTERED
- * sub-app's channel is blocked. A channel that doesn't exist yet counts as enabled
- * (it is created on the first notification).
- */
-@Composable
-fun rememberNotificationsEnabled(container: AppContainer, pushManager: PushManager): Boolean {
-    val context = LocalContext.current
-    val pushHealth = rememberPushHealth(container, pushManager)
-    val registeredIds by remember { mutableStateOf(container.registry.ids().map { it.value }) }
-
-    val notificationManager = remember { NotificationManagerCompat.from(context) }
-    var blockedChannels by remember { mutableStateOf(emptySet<String>()) }
-
-    LaunchedEffect(Unit) {
-        blockedChannels = container.registry.ids()
-            .map { it.value }
-            .filter { id ->
-                val channel = notificationManager.getNotificationChannel(id)
-                channel != null && channel.importance == NotificationManagerCompat.IMPORTANCE_NONE
-            }
-            .toSet()
-    }
-
-    return pushHealth.notificationsEnabled && !channelsBlocked(blockedChannels, registeredIds)
-}
-
-/**
  * True when WWT can actually show notifications: app-level enabled AND the Mail channel
  * not blocked. A channel that doesn't exist yet counts as enabled (it is created on the
  * first notification).
