@@ -137,6 +137,24 @@ fun MailContent(
     }
 }
 
+/**
+ * Builds a brand-new [MailWebSession] around a brand-new [WebView], then immediately
+ * runs it through [buildContainer] so the cookie is seeded and the first [WebView.loadUrl]
+ * fires as soon as the sub-app's scope is created, without waiting for [MailContent]'s
+ * `AndroidView` factory. The WebView built HERE is the one [MailWebSession.web] wraps, so
+ * back/reload/wake (which all act through `session.web`) and what actually renders on
+ * screen can never diverge — see the cast note in [buildContainer]. Called once per
+ * sub-app scope by `MailSubApp` via `SubAppScopes.getOrPut`; re-attaching after a
+ * launcher round-trip reuses the retained [MailWebSession.container] instead of calling
+ * this again, so [buildContainer]'s own call site inside [MailContent] below only ever
+ * runs when it is handed a session that did NOT come through here.
+ */
+internal fun newSession(ctx: Context, url: String, sessionToken: String?): MailWebSession {
+    val session = MailWebSession(AndroidWebViewHandle(WebView(ctx)))
+    session.container = buildContainer(ctx, session, url, sessionToken)
+    return session
+}
+
 /** The existing WebView + SwipeRefreshLayout construction, moved verbatim from
  *  ui/SubAppWebView.kt. Runs once per session — on re-attach [MailContent] returns the
  *  retained [MailWebSession.container] instead of calling this again. */

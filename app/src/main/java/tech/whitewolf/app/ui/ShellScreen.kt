@@ -1,6 +1,7 @@
 package tech.whitewolf.app.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationManagerCompat
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -19,25 +19,24 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import tech.whitewolf.app.AppContainer
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
-import tech.whitewolf.app.net.ConnectivityMonitor
 import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.push.PushStatus
-import tech.whitewolf.app.subapp.mailTarget
+import tech.whitewolf.app.subapp.SubAppRegistry
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,29 +61,27 @@ fun ShellScreen(container: AppContainer) {
         return
     }
 
-    val subApp = remember { mailTarget() }
-    // BROKEN ON PURPOSE, TEMPORARILY: mail content and its error screen moved to
-    // subapp/mail/MailContent.kt (Task 8), and Task 9 is what calls it from here. Until
-    // that lands, nothing in this file ever flips `errored`, so the resume-retry and the
-    // auto-retry LaunchedEffect below are dead, and `loading` never turns false — the
-    // content area renders NOTHING but a spinner that spins forever. This is not a bug to
-    // chase; it is the expected state of this branch between Task 8 and Task 9.
-    var loading by remember { mutableStateOf(true) }
-    var errored by remember { mutableStateOf(false) }
-    val retry: () -> Unit = { errored = false; loading = true }
-
     val context = LocalContext.current
+    val vm: ShellViewModel = viewModel(
+        factory = ShellViewModelFactory(container, WwtApp.from(context).wakeBus),
+    )
+    val route by vm.route.collectAsState()
+
+    // Applies a link that arrived while signed out, now that sign-in has completed.
+    // Idempotent (RouteState.onSignedIn() is a no-op with nothing held) and scoped to
+    // this composition's lifetime as a signed-in user: signing out unmounts this branch
+    // entirely (the `!loggedIn` return above), so signing back in re-runs it fresh.
+    LaunchedEffect(Unit) { vm.onSignedIn() }
+
+    // Composed BEFORE any sub-app's own Content(): OnBackPressedDispatcher dispatches
+    // LIFO, so a sub-app's own handler (mail's history walk today, a future list->player
+    // pop) must register LATER than this to win while it's the one on screen.
+    BackHandler(enabled = route is ShellRoute.Open) { vm.toLauncher() }
+
     val pushManager = remember { PushManager(context.applicationContext) }
     val pushStatusBus = remember { WwtApp.from(context).pushStatusBus }
     val pushStatus by pushStatusBus.status.collectAsState()
     var notificationsEnabled by remember { mutableStateOf(true) }
-
-    val connectivity = remember { ConnectivityMonitor(context.applicationContext) }
-    val online by connectivity.online.collectAsState()
-    DisposableEffect(Unit) {
-        connectivity.start()
-        onDispose { connectivity.stop() }
-    }
 
     // Re-drive push status from the current distributor state; also refresh whether WWT
     // can actually show notifications. Used on entry, resume, and the periodic poll.
@@ -121,10 +118,6 @@ fun ShellScreen(container: AppContainer) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 recheck(true)
                 validateSession()
-                // Reopening the app is the natural "try again" moment: if the
-                // error screen is up and we're online, retry without waiting
-                // for the 30s tick.
-                if (errored && online) retry()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -158,24 +151,6 @@ fun ShellScreen(container: AppContainer) {
         }
     }
 
-    // Offline-aware auto-retry: a load failure no longer latches forever.
-    // Immediate retry when a usable connection (re)appears; every 30s while
-    // online (short server blips); never while offline. Each retry waits for
-    // RESUMED so nothing reloads from the background. retry() flips `errored`,
-    // which restarts this effect — a recurring failure lands back here and
-    // waits the full interval, so there is no tight loop.
-    var wasOnline by remember { mutableStateOf(online) }
-    LaunchedEffect(errored, online) {
-        val cameOnline = online && !wasOnline
-        wasOnline = online
-        if (!errored || !online) return@LaunchedEffect
-        if (!cameOnline) delay(ERROR_RETRY_MS)
-        while (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            delay(ERROR_RETRY_MS)
-        }
-        retry()
-    }
-
     val signOut = {
         val endpoint = container.pushEndpointStore.get()
         // Gate before the teardown starts: unregister() below uses the live bearer and may
@@ -203,8 +178,11 @@ fun ShellScreen(container: AppContainer) {
 
     Scaffold(
         topBar = {
+            // Renders on every route, launcher and open alike: when a sub-app cannot
+            // load, this Sign out action is the ONLY way out (its own error screen has
+            // no sign-out button of its own — see subapp/mail/MailContent.kt).
             TopAppBar(
-                title = { Text(subApp.title) },
+                title = { Text(titleFor(route, container.registry)) },
                 actions = { TextButton(onClick = signOut) { Text("Sign out") } },
             )
         }
@@ -215,19 +193,37 @@ fun ShellScreen(container: AppContainer) {
                 PushStatusBanner(content = bannerContent)
             }
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                // Mail content is NOT rendered here yet. Task 9 replaces this whole
-                // `if (loading)` block with the `MailContent` call (subapp/mail/
-                // MailContent.kt) plus wherever it decides the loading indicator should
-                // live — see the note by `loading` above for why this spins forever
-                // in the meantime.
-                if (loading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center).testTag("progress"),
-                    )
+                when (val r = route) {
+                    is ShellRoute.Launcher ->
+                        LauncherScreen(container.registry.all(), onOpen = vm::open)
+
+                    is ShellRoute.Open -> {
+                        val entry = container.registry.byId(r.id)
+                        if (entry == null) {
+                            // Do not mutate route state during composition: an unknown id
+                            // (e.g. a persisted route from a sub-app a newer build
+                            // removed) is corrected as a side effect, not inline here.
+                            LaunchedEffect(r.id) { vm.toLauncher() }
+                        } else {
+                            // Keyed on the sub-app id so switching sub-apps can never
+                            // reuse composition state positionally.
+                            key(r.id.value) {
+                                entry.ui.Content(vm.hostFor(r.id), Modifier.fillMaxSize())
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+/** The top bar's title: the suite name at the launcher, the current sub-app's own title
+ *  while one is open (falling back to the suite name for the one-frame window before an
+ *  unknown route corrects itself to the launcher). */
+internal fun titleFor(route: ShellRoute, registry: SubAppRegistry): String = when (route) {
+    is ShellRoute.Launcher -> "WWT"
+    is ShellRoute.Open -> registry.byId(route.id)?.ui?.title ?: "WWT"
 }
 
 /**
@@ -241,8 +237,6 @@ private fun areWwtNotificationsEnabled(context: Context): Boolean {
     val channel = nm.getNotificationChannel(Notifications.CHANNEL_ID)
     return channel == null || channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
 }
-
-private const val ERROR_RETRY_MS = 30_000L
 
 /** Copy for the login screen when the server invalidated our token (WWT-57). Null on a
  *  deliberate sign-out — the user knows why they are there. */
