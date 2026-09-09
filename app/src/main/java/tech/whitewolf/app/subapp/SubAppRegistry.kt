@@ -1,16 +1,22 @@
 package tech.whitewolf.app.subapp
 
-import tech.whitewolf.app.BuildConfig
-
 /**
- * The ordered registry of WWT sub-apps. Mail is the only entry today; adding a
- * future sub-app is one new entry here. The shell auto-opens [default] until a
- * launcher UI exists (2+ sub-apps).
+ * The ordered registry of WWT sub-apps. An instance, not an object: entries are
+ * constructed with their dependencies by AppContainer. Must stay UI-free and safe to
+ * build off the main thread — PushReceiver builds the container on a background thread.
+ *
+ * There is deliberately no default()/auto-open: what opens on cold start is the
+ * launcher's last-used state, not a property of the registry.
  */
-object SubAppRegistry {
-    private val mail = MailTarget(id = "mail", title = "Mail", url = BuildConfig.MAIL_BASE_URL)
+class SubAppRegistry(private val entries: List<SubAppEntry>) {
+    init {
+        val ids = entries.map { it.id }
+        require(ids.toSet().size == ids.size) { "duplicate sub-app ids: $ids" }
+    }
 
-    fun all(): List<MailTarget> = listOf(mail)
-    fun default(): MailTarget = all().first()
+    fun all(): List<SubAppEntry> = entries
+
+    fun ids(): List<SubAppId> = entries.map { it.id }
+
+    fun byId(id: SubAppId): SubAppEntry? = entries.firstOrNull { it.id == id }
 }
-

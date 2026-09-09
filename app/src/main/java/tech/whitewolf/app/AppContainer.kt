@@ -10,7 +10,7 @@ import tech.whitewolf.app.auth.OidcSsoLogin
 import tech.whitewolf.app.auth.SessionBus
 import tech.whitewolf.app.auth.SsoLogin
 import tech.whitewolf.app.auth.TokenStore
-import tech.whitewolf.app.subapp.SubAppRegistry
+import tech.whitewolf.app.subapp.MailTarget
 
 /** Manual DI: builds the real dependency graph for the shell. */
 class AppContainer(context: Context) {
@@ -20,7 +20,7 @@ class AppContainer(context: Context) {
     private val cookies = AndroidWebCookies()
 
     // Auth base URL is the mail sub-app's origin (scheme://host) for now.
-    private val baseUrl: String = SubAppRegistry.default().let {
+    private val baseUrl: String = MailTarget(id = "mail", title = "Mail", url = BuildConfig.MAIL_BASE_URL).let {
         val u = java.net.URI(it.url); "${u.scheme}://${u.host}"
     }
 

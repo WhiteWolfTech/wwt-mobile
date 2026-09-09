@@ -1,26 +1,44 @@
 package tech.whitewolf.app.subapp
 
+import android.content.Context
+import android.net.Uri
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
+private class FakeSubApp(override val id: SubAppId) : SubApp {
+    override val title = id.value
+    override val icon: ImageVector = Icons.Filled.Email
+    @Composable override fun Content(host: SubAppHost, modifier: Modifier) = Unit
+}
+
+private fun entry(id: String) = SubAppEntry(FakeSubApp(SubAppId(id)), push = null)
+
 class SubAppRegistryTest {
-    @Test fun mailIsTheSoleDefaultSubApp() {
-        val all = SubAppRegistry.all()
-        assertEquals(1, all.size)
-        val mail = SubAppRegistry.default()
-        assertEquals("mail", mail.id)
-        assertEquals("Mail", mail.title)
-        assertEquals(mail, all.first())
+    @Test fun byIdFindsARegisteredSubApp() {
+        val reg = SubAppRegistry(listOf(entry("mail"), entry("video")))
+        assertEquals(SubAppId("video"), reg.byId(SubAppId("video"))?.ui?.id)
     }
 
-    @Test fun mailTargetExposesHostFromUrl() {
-        val s = MailTarget(id = "x", title = "X", url = "https://mail.whitewolf.tech/inbox")
-        assertEquals("mail.whitewolf.tech", s.host)
+    @Test fun byIdReturnsNullForAnUnknownSubApp() {
+        // A newer build's notification must not crash an older shell.
+        val reg = SubAppRegistry(listOf(entry("mail")))
+        assertNull(reg.byId(SubAppId("video")))
     }
 
-    @Test fun defaultUrlComesFromBuildConfig() {
-        // The mail entry's URL must be the configured MAIL_BASE_URL, not a literal.
-        assertTrue(SubAppRegistry.default().url.startsWith("https://"))
+    @Test fun allPreservesRegistrationOrder() {
+        val reg = SubAppRegistry(listOf(entry("mail"), entry("video")))
+        assertEquals(listOf(SubAppId("mail"), SubAppId("video")), reg.ids())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun duplicateIdsAreRejectedAtConstruction() {
+        // Two sub-apps sharing an id would collide on channel, prefs key and push instance.
+        SubAppRegistry(listOf(entry("mail"), entry("mail")))
     }
 }

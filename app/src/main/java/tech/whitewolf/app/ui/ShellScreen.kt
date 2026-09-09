@@ -35,13 +35,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import tech.whitewolf.app.AppContainer
+import tech.whitewolf.app.BuildConfig
 import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
 import tech.whitewolf.app.net.ConnectivityMonitor
 import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.push.PushStatus
-import tech.whitewolf.app.subapp.SubAppRegistry
+import tech.whitewolf.app.subapp.MailTarget
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +67,7 @@ fun ShellScreen(container: AppContainer) {
         return
     }
 
-    val subApp = remember { SubAppRegistry.default() }
+    val subApp = remember { MailTarget(id = "mail", title = "Mail", url = BuildConfig.MAIL_BASE_URL) }
     var loading by remember { mutableStateOf(true) }
     var errored by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableStateOf(0) }
