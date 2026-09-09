@@ -101,7 +101,7 @@ fun MailContent(
     // thread/compose navigation and seeds a base entry under deep links). At
     // the history root the handler disables itself and default back applies.
     // Suppressed while the error screen is up (see mailBackEnabled).
-    BackHandler(enabled = mailBackEnabled(canGoBack, errored)) { session.web.goBack() }
+    BackHandler(enabled = mailBackEnabled(canGoBack, errored)) { session.goBack() }
 
     // Re-entering composition (from the launcher, or another sub-app) primes state from
     // the live view and resumes JS timers; leaving pauses them. State is observed via
@@ -123,7 +123,7 @@ fun MailContent(
     LaunchedEffect(tick, pageLoaded) {
         if (pageLoaded && tick > session.lastWakeSeen) {
             session.lastWakeSeen = tick
-            session.web.evaluateJavascript(WAKE_JS)
+            session.evaluateJavascript(WAKE_JS)
         }
     }
 

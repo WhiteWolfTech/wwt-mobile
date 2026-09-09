@@ -17,6 +17,7 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     var resumed = 0
     var destroyed = false
     var destroys = 0
+    var goBacks = 0
     // Records call order so a test can tell onPause/onResume apart from a backwards
     // implementation that wires them to the wrong lifecycle method — matching totals
     // alone can't catch that.
@@ -25,7 +26,7 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     // e.g. a repeat main-frame error — so ordering around reload() is observable.
     var onReload: (() -> Unit)? = null
     override fun canGoBack() = history
-    override fun goBack() {}
+    override fun goBack() { goBacks++ }
     override fun reload() { reloads++; onReload?.invoke() }
     override fun loadUrl(url: String) { loaded = url }
     override fun evaluateJavascript(script: String) { js += script }
@@ -168,5 +169,28 @@ class MailWebSessionTest {
         s.destroy()
         s.destroy()
         assertEquals(1, web.destroys)
+    }
+
+    // Finding 4 follow-up: MailContent used to reach through `session.web` directly for
+    // back-press (`session.web.goBack()`) and the wake tick's JS ping
+    // (`session.web.evaluateJavascript(...)`), bypassing `destroyed` entirely — both
+    // reachable in the one-frame window between destroy() and the old composition's
+    // disposal. MailWebSession now owns guarded delegates for both; these pin that they
+    // no-op once destroyed, same shape as the pause/resume tests above.
+
+    @Test fun destroyedSessionIgnoresGoBack() {
+        val web = FakeWeb()
+        val s = MailWebSession(web)
+        s.destroy()
+        s.goBack()
+        assertEquals(0, web.goBacks)
+    }
+
+    @Test fun destroyedSessionIgnoresEvaluateJavascript() {
+        val web = FakeWeb()
+        val s = MailWebSession(web)
+        s.destroy()
+        s.evaluateJavascript("window.wwtWake && window.wwtWake()")
+        assertTrue(web.js.isEmpty())
     }
 }

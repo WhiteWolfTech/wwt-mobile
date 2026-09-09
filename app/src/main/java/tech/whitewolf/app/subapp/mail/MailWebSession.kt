@@ -25,7 +25,21 @@ interface WebViewHandle {
  * never actually calls a `bind()`, so a prior SessionListener/bind/unbind here was dead
  * production code, exercised only by tests that existed to exercise it.
  */
-class MailWebSession(val web: WebViewHandle) {
+class MailWebSession(
+    /**
+     * Public for `buildContainer`'s construction-time access to the concrete view
+     * (`(session.web as AndroidWebViewHandle).view`) — narrowing that is a larger change
+     * than this class's guard boundary. Every OTHER caller must go through this class's
+     * own guarded delegates ([goBack], [evaluateJavascript], and the rest below) rather
+     * than reaching through this field directly: a direct `session.web.xxx()` call
+     * bypasses [destroyed] entirely, and Finding 4's own fix originally missed exactly
+     * that — `MailContent` called `session.web.goBack()` and
+     * `session.web.evaluateJavascript(...)` straight through this field, both still
+     * reachable in the one-frame window where `destroy()` has run but the composition
+     * showing this session has not yet disposed.
+     */
+    val web: WebViewHandle,
+) {
     /**
      * The view actually handed to AndroidView. Retained here so a second composition
      * re-attaches the same one; the factory must detach it from its previous parent first.
@@ -89,6 +103,23 @@ class MailWebSession(val web: WebViewHandle) {
 
     fun notifyMainFrameError() {
         _errored.value = true
+    }
+
+    /** System back, gated the same way every other [web]-forwarding method is: see
+     *  [destroyed]. MailContent's BackHandler must call this, not `session.web.goBack()`
+     *  directly — the latter bypasses the guard entirely. */
+    fun goBack() {
+        if (destroyed) return
+        web.goBack()
+    }
+
+    /** A wake tick's JS ping into the page, gated the same way every other
+     *  [web]-forwarding method is: see [destroyed]. MailContent's wake effect must call
+     *  this, not `session.web.evaluateJavascript(...)` directly — the latter bypasses
+     *  the guard entirely. */
+    fun evaluateJavascript(script: String) {
+        if (destroyed) return
+        web.evaluateJavascript(script)
     }
 
     /**
