@@ -1,5 +1,9 @@
 package tech.whitewolf.app.subapp.mail
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -16,9 +20,12 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     // implementation that wires them to the wrong lifecycle method — matching totals
     // alone can't catch that.
     val calls = mutableListOf<String>()
+    // Fires from inside reload(), letting a test simulate the reload itself failing —
+    // e.g. a repeat main-frame error — so ordering around reload() is observable.
+    var onReload: (() -> Unit)? = null
     override fun canGoBack() = history
     override fun goBack() {}
-    override fun reload() { reloads++ }
+    override fun reload() { reloads++; onReload?.invoke() }
     override fun loadUrl(url: String) { loaded = url }
     override fun evaluateJavascript(script: String) { js += script }
     override fun onPause() { paused++; calls += "pause" }
@@ -26,6 +33,7 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     override fun destroy() { destroyed = true }
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class MailWebSessionTest {
     @Test fun attachPrimesCanGoBackFromTheLiveWebView() {
         // The retained client keeps browsing history across a launcher round-trip, but a
@@ -134,18 +142,39 @@ class MailWebSessionTest {
         assertFalse(s.errored.value)
     }
 
-    @Test fun retryClearsTheErrorAndReloads() {
-        // Clearing errored optimistically (not waiting for a callback) matters: a REPEAT
-        // failure must be a false->true transition, not true->true, or a Compose effect
-        // keyed on `errored` (the auto-retry loop) would never see it change and restart.
+    @Test fun retryClearsTheErrorBeforeReloadingSoARepeatFailureIsObservable() = runTest(UnconfinedTestDispatcher()) {
+        // Pins the ORDER inside retry(), not just its end state: clear `errored` BEFORE
+        // calling reload(), not after. A test that only checks the final value (as the
+        // first version of this test did) cannot tell the two orders apart when reload()
+        // is a bare counter that never calls back — both orders end up false. So make
+        // reload() itself simulate an IMMEDIATE repeat failure, and collect the actual
+        // emission SEQUENCE on `errored` (UnconfinedTestDispatcher so each StateFlow
+        // write resumes the collector synchronously, in order, rather than coalescing
+        // multiple writes into one final value the way a StandardTestDispatcher would).
+        //
+        // Correct order (clear, then reload-which-fails): true (initial failure) ->
+        // false (retry's optimistic clear) -> true (repeat failure — a REAL false->true
+        // transition, since errored was false when it landed).
+        // Wrong order (reload-which-fails, then clear): true (initial failure) -> the
+        // repeat failure's `_errored.value = true` writes an EQUAL value while still
+        // true, MutableStateFlow dedupes it away, nothing observable happens -> false
+        // (the trailing clear) — landing on `false` while a load is still actually
+        // broken, and one fewer emission than the correct order produced.
         val web = FakeWeb()
         val s = MailWebSession(web)
+        web.onReload = { s.notifyMainFrameError() }
         s.notifyMainFrameError()
-        assertTrue(s.errored.value)
+
+        val emissions = mutableListOf<Boolean>()
+        val job = launch { s.errored.collect { emissions.add(it) } }
 
         s.retry()
 
-        assertFalse(s.errored.value)
+        job.cancel()
+        assertEquals(listOf(true, false, true), emissions)
+        // The end state matters too: a wrong order would land on `false` (a live error
+        // wrongly cleared) instead of `true` (the repeat failure correctly still showing).
+        assertTrue(s.errored.value)
         assertEquals(1, web.reloads)
     }
 }

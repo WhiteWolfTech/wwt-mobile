@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
@@ -125,6 +126,28 @@ fun MailContent(
         }
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Restored verbatim (including this comment) from ShellScreen.kt at 2254e96, where
+    // this lived before the error screen moved into MailContent. A second, INDEPENDENT
+    // retry trigger from the cadence effect below, not a replacement for it — the cadence
+    // effect may be mid-delay when this fires, and that is fine: session.retry() is
+    // idempotent (clears `errored`, reloads), so at most one of the two ends up reloading
+    // a page the other is also mid-reloading, which is harmless. Matches the original's
+    // shape rather than inventing coordination between the two triggers.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // Reopening the app is the natural "try again" moment: if the
+                // error screen is up and we're online, retry without waiting
+                // for the 30s tick.
+                if (errored && online) session.retry()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Offline-aware auto-retry (docs/superpowers/specs/2026-07-07-offline-error-handling-
     // design.md): a load failure no longer latches forever. Immediate retry when a usable
     // connection (re)appears; every ERROR_RETRY_MS while online (short server blips);
@@ -132,7 +155,6 @@ fun MailContent(
     // background. session.retry() clears `errored` BEFORE reloading, so a repeat failure
     // is a false->true transition this effect's key sees — not true->true, which a plain
     // StateFlow write would dedupe away and this effect would never restart from.
-    val lifecycleOwner = LocalLifecycleOwner.current
     var wasOnline by remember { mutableStateOf(online) }
     LaunchedEffect(errored, online) {
         val cameOnline = online && !wasOnline
