@@ -32,6 +32,19 @@ class RouteStateTest {
         assertEquals(ShellRoute.Launcher, s.route.value)
     }
 
+    @Test fun anUnknownSavedRouteFallsBackToTheLauncherEvenWithAKnownLastUsed() {
+        // saved is this session's actual route, more specific and more recent than
+        // lastUsed; when it no longer resolves the honest landing is the launcher, not
+        // a different sub-app the user was never in this session.
+        val s = RouteState(known, lastUsed = mail, saved = SubAppId("gone"))
+        assertEquals(ShellRoute.Launcher, s.route.value)
+    }
+
+    @Test fun restoreKeyIsNullAtTheLauncherOnColdStart() {
+        val s = RouteState(known, lastUsed = null, saved = null)
+        assertNull(s.restoreKey)
+    }
+
     @Test fun aDeepLinkWhileSignedInOpensItsTargetImmediately() {
         val s = RouteState(known, lastUsed = mail, saved = null)
         s.offerLink(WakePayload(video, "v1"), signedIn = true)
@@ -43,13 +56,25 @@ class RouteStateTest {
         val s = RouteState(known, lastUsed = mail, saved = null)
         s.offerLink(WakePayload(video, "v1"), signedIn = false)
         assertEquals(ShellRoute.Open(mail), s.route.value)  // not yet navigated
+        assertNull(s.pendingLink.value)  // not yet exposed to observers either
         s.onSignedIn()
         assertEquals(ShellRoute.Open(video), s.route.value)
+        assertEquals(WakePayload(video, "v1"), s.pendingLink.value)
     }
 
     @Test fun aDeepLinkForAnUnknownSubAppIsIgnored() {
         val s = RouteState(known, lastUsed = mail, saved = null)
         s.offerLink(WakePayload(SubAppId("ghost"), "x"), signedIn = true)
+        assertEquals(ShellRoute.Open(mail), s.route.value)
+        assertNull(s.pendingLink.value)
+    }
+
+    @Test fun anUnknownDeepLinkWhileSignedOutStaysIgnoredAfterSignIn() {
+        // Confirms the known-check happens before the link is ever held, so signing in
+        // afterwards cannot resurrect an unknown target.
+        val s = RouteState(known, lastUsed = mail, saved = null)
+        s.offerLink(WakePayload(SubAppId("ghost"), "x"), signedIn = false)
+        s.onSignedIn()
         assertEquals(ShellRoute.Open(mail), s.route.value)
         assertNull(s.pendingLink.value)
     }
@@ -66,5 +91,18 @@ class RouteStateTest {
         val s = RouteState(known, lastUsed = null, saved = null)
         s.open(video)
         assertEquals("video", s.restoreKey)
+    }
+
+    @Test fun openIgnoresAnUnknownSubApp() {
+        val s = RouteState(known, lastUsed = mail, saved = null)
+        s.open(SubAppId("ghost"))
+        assertEquals(ShellRoute.Open(mail), s.route.value)
+    }
+
+    @Test fun toLauncherMovesOffAnOpenRouteAndClearsTheRestoreKey() {
+        val s = RouteState(known, lastUsed = mail, saved = null)
+        s.toLauncher()
+        assertEquals(ShellRoute.Launcher, s.route.value)
+        assertNull(s.restoreKey)
     }
 }

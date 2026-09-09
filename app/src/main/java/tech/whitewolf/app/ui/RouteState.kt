@@ -18,6 +18,7 @@ class RouteState(
     lastUsed: SubAppId?,
     saved: SubAppId?,
 ) {
+    /** An unknown `saved` falls to [ShellRoute.Launcher] rather than to `lastUsed`: `saved` is this session's actual, more specific route, so a stale one is less trustworthy than no signal at all. */
     private val initial: ShellRoute = (saved ?: lastUsed)
         ?.takeIf(known)
         ?.let { ShellRoute.Open(it) }
