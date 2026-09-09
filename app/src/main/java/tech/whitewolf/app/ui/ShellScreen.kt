@@ -99,6 +99,29 @@ fun ShellScreen(container: AppContainer) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Track which sub-app is on screen so PushReceiver can decide whether to notify
+    // (sub-app different from the one on screen) or refresh silently (same sub-app).
+    // Published on ON_START as well as on route change: clearing on ON_STOP without
+    // restoring on ON_START would leave `current` null after any background -> foreground
+    // cycle, so every wake for the sub-app actually on screen would notify instead of
+    // refreshing silently — a regression on today's behaviour.
+    val visible = remember { WwtApp.from(context).visibleRoute }
+    DisposableEffect(lifecycleOwner, route) {
+        val target = (route as? ShellRoute.Open)?.id
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            visible.set(target)
+        }
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                Lifecycle.Event.ON_START -> visible.set(target)
+                Lifecycle.Event.ON_STOP -> visible.set(null)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs); visible.set(null) }
+    }
+
     val signOut = {
         val endpoint = container.pushEndpointStore.get()
         // Gate before the teardown starts: unregister() below uses the live bearer and may
