@@ -3,13 +3,11 @@ package tech.whitewolf.app.ui
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.core.app.NotificationManagerCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
@@ -21,7 +19,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
@@ -67,10 +63,12 @@ fun ShellScreen(container: AppContainer) {
     }
 
     val subApp = remember { mailTarget() }
+    // loading/errored are wired to the hosted content in Task 9; MailContent now owns
+    // both the WebView and the error screen (subapp/mail/MailContent.kt), so nothing in
+    // this file currently flips either flag — loading spins forever until that lands.
     var loading by remember { mutableStateOf(true) }
     var errored by remember { mutableStateOf(false) }
-    var reloadKey by remember { mutableStateOf(0) }
-    val retry: () -> Unit = { errored = false; loading = true; reloadKey++ }
+    val retry: () -> Unit = { errored = false; loading = true }
 
     val context = LocalContext.current
     val pushManager = remember { PushManager(context.applicationContext) }
@@ -214,37 +212,12 @@ fun ShellScreen(container: AppContainer) {
                 PushStatusBanner(content = bannerContent)
             }
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                when {
-                    errored -> Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(errorMessageFor(online, subApp.title))
-                        Button(
-                            onClick = retry,
-                            modifier = Modifier.padding(top = 12.dp).testTag("retry"),
-                        ) { Text("Retry") }
-                        Button(
-                            onClick = signOut,
-                            modifier = Modifier.padding(top = 8.dp).testTag("signout"),
-                        ) { Text("Sign out") }
-                    }
-                    else -> {
-                        key(reloadKey) {
-                            SubAppWebView(
-                                subApp = subApp,
-                                sessionToken = container.auth.currentToken(),
-                                onPageError = { errored = true },
-                                onPageLoaded = { loading = false },
-                            )
-                        }
-                        if (loading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.align(Alignment.Center).testTag("progress"),
-                            )
-                        }
-                    }
+                // The hosted-content call (subapp/mail/MailContent.kt) and its error
+                // screen are wired here in Task 9 — see the note by `loading` above.
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center).testTag("progress"),
+                    )
                 }
             }
         }
@@ -264,11 +237,6 @@ private fun areWwtNotificationsEnabled(context: Context): Boolean {
 }
 
 private const val ERROR_RETRY_MS = 30_000L
-
-/** Copy for the main-frame load-error screen: offline vs server-unreachable. */
-internal fun errorMessageFor(online: Boolean, title: String): String =
-    if (online) "Couldn't reach $title."
-    else "You're offline. Waiting for a connection…"
 
 /** Copy for the login screen when the server invalidated our token (WWT-57). Null on a
  *  deliberate sign-out — the user knows why they are there. */
