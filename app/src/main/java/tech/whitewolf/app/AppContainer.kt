@@ -11,7 +11,10 @@ import tech.whitewolf.app.auth.SessionBus
 import tech.whitewolf.app.auth.SsoLogin
 import tech.whitewolf.app.auth.TokenStore
 import tech.whitewolf.app.net.ConnectivityMonitor
+import tech.whitewolf.app.push.PushApiClient
+import tech.whitewolf.app.push.PushEndpointStore
 import tech.whitewolf.app.subapp.SubAppEntry
+import tech.whitewolf.app.subapp.SubAppId
 import tech.whitewolf.app.subapp.SubAppRegistry
 import tech.whitewolf.app.subapp.SubAppScopes
 import tech.whitewolf.app.subapp.mail.MailPush
@@ -41,15 +44,7 @@ class AppContainer(context: Context) {
     val ssoLogin: SsoLogin =
         OidcSsoLogin(OidcAuthService(context.applicationContext), auth)
 
-    // A 401 from the push registry means the bearer is dead server-side: drop the session
-    // rather than retrying a stale token forever.
-    val pushApiClient = tech.whitewolf.app.push.PushApiClient(
-        http,
-        baseUrl,
-        { tokenStore.token() },
-        { auth.invalidate() },
-    )
-    val pushEndpointStore = tech.whitewolf.app.push.PushEndpointStore(secureStore)
+    val pushEndpointStore = PushEndpointStore(secureStore)
 
     // Reachability for a sub-app's offline/online error copy. A container-level (shell-
     // level) singleton, not per-composition the way ShellScreen used to own one: a sub-app
@@ -87,4 +82,16 @@ class AppContainer(context: Context) {
             ),
         ),
     )
+
+    // One PushApiClient per sub-app instance — the UnifiedPush side already registers one
+    // instance per sub-app (PushManager), and the backend registration call must match it
+    // 1:1 so an endpoint is only ever registered/unregistered against its own sub-app's
+    // registry. Every sub-app shares the shell's single baseUrl/token for now because
+    // there is only one backend (mail's); Task 18 gives each sub-app its own base URL and
+    // token supplier once Phase 4 wires up per-sub-app identity.
+    private val pushClients: Map<SubAppId, PushApiClient> = registry.ids().associateWith {
+        PushApiClient(http, baseUrl, { tokenStore.token() }, { auth.invalidate() })
+    }
+
+    fun pushClientFor(id: SubAppId): PushApiClient? = pushClients[id]
 }

@@ -71,7 +71,7 @@ fun ShellScreen(container: AppContainer) {
     // pop) must register LATER than this to win while it's the one on screen.
     BackHandler(enabled = route is ShellRoute.Open) { vm.toLauncher() }
 
-    val pushManager = remember { PushManager(context.applicationContext) }
+    val pushManager = remember { PushManager(context.applicationContext, container.registry::ids) }
     val pushHealth = rememberPushHealth(container, pushManager)
     val pushStatus = pushHealth.status
     val notificationsEnabled = pushHealth.notificationsEnabled
@@ -123,7 +123,9 @@ fun ShellScreen(container: AppContainer) {
     }
 
     val signOut = {
-        val endpoint = container.pushEndpointStore.get()
+        // Every registered sub-app's endpoint, captured before teardown starts: each has
+        // its own UnifiedPush instance and its own backend registration to drop.
+        val endpoints = container.pushEndpointStore.all(container.registry.ids())
         // Gate before the teardown starts: unregister() below uses the live bearer and may
         // earn a 401, but this sign-out is deliberate — no "session expired" notice.
         container.sessionBus.beginSignOut()
@@ -133,8 +135,10 @@ fun ShellScreen(container: AppContainer) {
             // logout() clears the token. Not tied to composition, so it survives the
             // screen leaving composition when loggedIn flips.
             try {
-                if (endpoint != null) container.pushApiClient.unregister(endpoint)
-                container.pushEndpointStore.clear()
+                endpoints.forEach { (id, endpoint) ->
+                    container.pushClientFor(id)?.unregister(endpoint)
+                    container.pushEndpointStore.clear(id)
+                }
                 container.auth.logout()
             } finally {
                 // Must run even if the teardown throws (EncryptedSharedPreferences can): a

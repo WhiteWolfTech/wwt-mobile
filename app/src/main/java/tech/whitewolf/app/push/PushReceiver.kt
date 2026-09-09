@@ -20,19 +20,20 @@ import tech.whitewolf.app.subapp.SubAppId
 class PushReceiver : MessagingReceiver() {
     override fun onNewEndpoint(context: Context, endpoint: String, instance: String) {
         val app = context.applicationContext
+        val id = SubAppId.parse(instance) ?: return   // unknown instance -> ignore, never crash
         val pending = goAsync()
         Thread {
             try {
                 val wwtApp = tech.whitewolf.app.WwtApp.from(app)
                 val container = wwtApp.container
-                container.pushEndpointStore.save(endpoint)
+                container.pushEndpointStore.save(id, endpoint)
                 // Surface push health from the endpoint host now — independent of whether
                 // the backend register below succeeds.
                 wwtApp.pushStatusBus.set(
                     pushStatusForEndpoint(endpoint, tech.whitewolf.app.BuildConfig.NTFY_HOST)
                 )
-                val ok = container.pushApiClient.register(endpoint)
-                if (!ok) android.util.Log.w("PushReceiver", "push endpoint registration failed")
+                val ok = container.pushClientFor(id)?.register(endpoint) ?: false
+                if (!ok) android.util.Log.w("PushReceiver", "push endpoint registration failed for $instance")
             } catch (e: Throwable) {
                 android.util.Log.w("PushReceiver", "push endpoint registration error", e)
             } finally {
