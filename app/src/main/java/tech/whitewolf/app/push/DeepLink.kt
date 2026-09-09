@@ -16,15 +16,20 @@ import java.net.URLEncoder
  *
  * String forms are the primitive so the whole thing is JVM-testable; android.net.Uri is
  * stubbed in unit tests.
+ *
+ * An empty itemId is treated as absent and is emitted and parsed as the target-only form.
  */
 object DeepLink {
     const val SCHEME = "wwt"
     private const val AUTHORITY = "subapp"
     private const val PREFIX = "$SCHEME://$AUTHORITY/"
 
+    private fun encode(s: String): String =
+        URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+
     fun buildString(payload: WakePayload): String {
         val item = payload.itemId
-        val tail = if (item.isNullOrEmpty()) "" else "/" + URLEncoder.encode(item, "UTF-8")
+        val tail = if (item.isNullOrEmpty()) "" else "/" + encode(item)
         return PREFIX + payload.subAppId.value + tail
     }
 
@@ -38,8 +43,13 @@ object DeepLink {
         val slash = rest.indexOf('/')
         val idPart = if (slash < 0) rest else rest.substring(0, slash)
         val id = SubAppId.parse(idPart) ?: return null
-        val item = if (slash < 0 || slash == rest.lastIndex) null
-        else URLDecoder.decode(rest.substring(slash + 1), "UTF-8")
+        if (slash < 0) {
+            return WakePayload(id)
+        }
+        // After the slash, remainder must be non-empty and contain no further slashes
+        val itemPart = rest.substring(slash + 1)
+        if (itemPart.isEmpty() || itemPart.indexOf('/') >= 0) return null
+        val item = URLDecoder.decode(itemPart, "UTF-8")
         return WakePayload(id, item)
     }
 

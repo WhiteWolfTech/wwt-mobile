@@ -33,10 +33,32 @@ class DeepLinkTest {
         assertNull(DeepLink.parseString("wwt://subapp/"))
         // An id that is unsafe as a channel id or instance name never becomes a target.
         assertNull(DeepLink.parseString("wwt://subapp/Mail"))
+        // Reject trailing slash: buildString never emits this.
+        assertNull(DeepLink.parseString("wwt://subapp/mail/"))
+        // Reject multiple slashes: buildString percent-encodes them, so raw slashes are invalid.
+        assertNull(DeepLink.parseString("wwt://subapp/mail/extra/segments"))
+    }
+
+    @Test fun itemIdIsPercentEncodedIntoTheWireFormat() {
+        assertEquals(
+            "wwt://subapp/video/a%20b%2Fc",
+            DeepLink.buildString(WakePayload(SubAppId("video"), "a b/c")),
+        )
     }
 
     @Test fun itemIdIsPercentEncodedAndDecoded() {
         val p = WakePayload(SubAppId("video"), "a b/c")
         assertEquals(p, DeepLink.parseString(DeepLink.buildString(p)))
+    }
+
+    @Test fun emptyItemIdIsTreatedAsAbsent() {
+        assertEquals(
+            "wwt://subapp/mail",
+            DeepLink.buildString(WakePayload(SubAppId("mail"), "")),
+        )
+        assertEquals(
+            WakePayload(SubAppId("mail")),
+            DeepLink.parseString(DeepLink.buildString(WakePayload(SubAppId("mail"), ""))),
+        )
     }
 }
