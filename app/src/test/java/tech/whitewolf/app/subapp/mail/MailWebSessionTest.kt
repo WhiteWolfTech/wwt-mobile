@@ -12,13 +12,17 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     var paused = 0
     var resumed = 0
     var destroyed = false
+    // Records call order so a test can tell onPause/onResume apart from a backwards
+    // implementation that wires them to the wrong lifecycle method — matching totals
+    // alone can't catch that.
+    val calls = mutableListOf<String>()
     override fun canGoBack() = history
     override fun goBack() {}
     override fun reload() { reloads++ }
     override fun loadUrl(url: String) { loaded = url }
     override fun evaluateJavascript(script: String) { js += script }
-    override fun onPause() { paused++ }
-    override fun onResume() { resumed++ }
+    override fun onPause() { paused++; calls += "pause" }
+    override fun onResume() { resumed++; calls += "resume" }
     override fun destroy() { destroyed = true }
 }
 
@@ -72,11 +76,61 @@ class MailWebSessionTest {
         s.onAttached()
         assertEquals(1, web.paused)
         assertEquals(1, web.resumed)
+        // Totals alone pass a backwards wiring (onDetached->resume, onAttached->pause).
+        // Only the sequence proves onDetached paused and onAttached resumed, in that order.
+        assertEquals(listOf("pause", "resume"), web.calls)
     }
 
     @Test fun errorIsRecordedSoTheHostCanSuppressHistoryBack() {
         val s = MailWebSession(FakeWeb(history = true))
         s.notifyMainFrameError()
         assertTrue(s.errored.value)
+    }
+
+    @Test fun historyChangeUpdatesCanGoBackAndNotifiesTheBoundListener() {
+        // notifyHistoryChanged() has two effects — updating the canGoBack flow and firing
+        // the listener. A test that only checks one lets an implementation that drops the
+        // other slip through.
+        val web = FakeWeb(history = false)
+        val s = MailWebSession(web)
+        var notified: Boolean? = null
+        s.bind(object : SessionListener {
+            override fun onPageFinished() {}
+            override fun onHistoryChanged(canGoBack: Boolean) { notified = canGoBack }
+            override fun onMainFrameError() {}
+        })
+        assertFalse(s.canGoBack.value)
+
+        web.history = true
+        s.notifyHistoryChanged()
+
+        assertTrue(s.canGoBack.value)
+        assertEquals(true, notified)
+    }
+
+    @Test fun mainFrameErrorNotifiesTheBoundListener() {
+        // errorIsRecordedSoTheHostCanSuppressHistoryBack never binds a listener, so it can't
+        // catch a notifyMainFrameError() that forgot to call listener?.onMainFrameError().
+        val s = MailWebSession(FakeWeb())
+        var errors = 0
+        s.bind(object : SessionListener {
+            override fun onPageFinished() {}
+            override fun onHistoryChanged(canGoBack: Boolean) {}
+            override fun onMainFrameError() { errors++ }
+        })
+        s.notifyMainFrameError()
+        assertEquals(1, errors)
+    }
+
+    @Test fun pageFinishedClearsAPriorError() {
+        // An error screen must clear once a later load succeeds; notifyPageFinished() is
+        // where that recovery happens.
+        val s = MailWebSession(FakeWeb())
+        s.notifyMainFrameError()
+        assertTrue(s.errored.value)
+
+        s.notifyPageFinished()
+
+        assertFalse(s.errored.value)
     }
 }
