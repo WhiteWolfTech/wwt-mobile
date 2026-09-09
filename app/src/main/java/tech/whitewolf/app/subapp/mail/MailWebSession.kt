@@ -51,14 +51,29 @@ class MailWebSession(val web: WebViewHandle) {
     private val _errored = MutableStateFlow(false)
     val errored: StateFlow<Boolean> = _errored
 
+    /**
+     * True once [destroy] has run. Sign-out's `discardAll()` calls [destroy] SYNCHRONOUSLY
+     * on the UI thread, but Compose's own disposal of the composition that was showing
+     * this session (MailContent's `DisposableEffect` -> [onDetached]) is not ordered
+     * against that call — it lands on a later recomposition, which can be AFTER `destroy()`
+     * already ran `web.destroy()`. Android documents further calls on a destroyed WebView
+     * as undefined behaviour (observed in practice as "Called on a destroyed WebView",
+     * sometimes throwing), so every method below that forwards to [web] must become a
+     * no-op once this is true — a destroyed session must be inert, not merely
+     * un-reattached.
+     */
+    private var destroyed = false
+
     /** Re-entering composition: prime from the live view, resume timers. */
     fun onAttached() {
+        if (destroyed) return
         _canGoBack.value = web.canGoBack()
         web.onResume()
     }
 
     /** Leaving composition (launcher, another sub-app): stop JS timers. */
     fun onDetached() {
+        if (destroyed) return
         web.onPause()
     }
 
@@ -68,6 +83,7 @@ class MailWebSession(val web: WebViewHandle) {
     }
 
     fun notifyHistoryChanged() {
+        if (destroyed) return
         _canGoBack.value = web.canGoBack()
     }
 
@@ -83,11 +99,14 @@ class MailWebSession(val web: WebViewHandle) {
      * and restarts instead of silently doing nothing because the StateFlow never changed.
      */
     fun retry() {
+        if (destroyed) return
         _errored.value = false
         web.reload()
     }
 
     fun destroy() {
+        if (destroyed) return
+        destroyed = true
         web.destroy()
     }
 }

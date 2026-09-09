@@ -16,6 +16,7 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     var paused = 0
     var resumed = 0
     var destroyed = false
+    var destroys = 0
     // Records call order so a test can tell onPause/onResume apart from a backwards
     // implementation that wires them to the wrong lifecycle method — matching totals
     // alone can't catch that.
@@ -30,7 +31,7 @@ private class FakeWeb(var history: Boolean = false) : WebViewHandle {
     override fun evaluateJavascript(script: String) { js += script }
     override fun onPause() { paused++; calls += "pause" }
     override fun onResume() { resumed++; calls += "resume" }
-    override fun destroy() { destroyed = true }
+    override fun destroy() { destroyed = true; destroys++ }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -133,5 +134,39 @@ class MailWebSessionTest {
         // wrongly cleared) instead of `true` (the repeat failure correctly still showing).
         assertTrue(s.errored.value)
         assertEquals(1, web.reloads)
+    }
+
+    // Sign-out's discardAll() calls destroy() synchronously on the UI thread, but
+    // Compose's own disposal of the composition that was showing this session
+    // (MailContent's DisposableEffect -> onDetached()) is not ordered against that —
+    // it can land on a later recomposition, AFTER destroy() already tore down the
+    // WebView. Android treats further calls on a destroyed WebView as undefined
+    // behaviour (observed as "Called on a destroyed WebView", sometimes throwing), so
+    // a destroyed session must not forward onAttached()/onDetached()/retry() to it.
+
+    @Test fun destroyedSessionIgnoresOnDetached() {
+        val web = FakeWeb()
+        val s = MailWebSession(web)
+        s.destroy()
+        val pausedBefore = web.paused
+        s.onDetached()
+        assertEquals(pausedBefore, web.paused)
+    }
+
+    @Test fun destroyedSessionIgnoresOnAttached() {
+        val web = FakeWeb()
+        val s = MailWebSession(web)
+        s.destroy()
+        val resumedBefore = web.resumed
+        s.onAttached()
+        assertEquals(resumedBefore, web.resumed)
+    }
+
+    @Test fun destroyCalledTwiceDestroysTheWebViewOnce() {
+        val web = FakeWeb()
+        val s = MailWebSession(web)
+        s.destroy()
+        s.destroy()
+        assertEquals(1, web.destroys)
     }
 }
