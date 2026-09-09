@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
@@ -14,11 +15,13 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import tech.whitewolf.app.subapp.Retained
 import tech.whitewolf.app.subapp.SubAppId
 
 /**
@@ -81,6 +84,55 @@ class ShellNavTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithTag("tile.mail").performClick()
             compose.onNodeWithTag("subapp.mail").assertIsDisplayed()
+        }
+    }
+
+    @Test fun signOutDiscardsRetainedMailStateSoTheNextEntryIsRebuilt() {
+        // Finding 1 (2026-09-08 final review): SubAppScopes.discardAll() had zero
+        // production callers, so signing out left the previous session's WebView (DOM,
+        // localStorage) retained and re-attached verbatim on the next sign-in. The fix
+        // wires discardAll() into ShellScreen's signOut lambda. This asserts the actual
+        // observable contract that matters: the retained mail scope is a DIFFERENT
+        // instance after a sign-out/sign-in round trip, i.e. it was rebuilt, not reused.
+        //
+        // scopes.getOrPut(id) { error(...) } is a safe, non-invasive way to PEEK at
+        // whatever is already retained without creating anything: the create lambda
+        // only runs when nothing is held. It only throws if mail's content has not
+        // actually composed (and retained a scope) by the point it is called, which
+        // both call sites below arrange for by asserting "subapp.mail" is displayed
+        // immediately before peeking.
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val scopes = WwtApp.from(context).container.scopes
+        val mailId = SubAppId("mail")
+
+        ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNodeWithTag("tile.mail").performClick()
+            compose.onNodeWithTag("subapp.mail").assertIsDisplayed()
+            val before: Retained =
+                scopes.getOrPut(mailId) { error("mail scope should already be retained") }
+
+            compose.onNodeWithText("Sign out").performClick()
+            // Confirms sign-out actually took effect (not just that discardAll() ran)
+            // before asserting anything about scopes: the login screen replacing the
+            // shell is the visible half of the same loggedIn flip that triggers discard.
+            compose.onNodeWithTag("email").assertIsDisplayed()
+
+            // Sign back in the same way @Before does: this suite has no live backend
+            // credentials to drive the real SSO/password flow. The ShellViewModel
+            // instance (and its route) survives the round trip — it is scoped to the
+            // Activity, not to the signed-in composition — so route stays Open(mail)
+            // and mail's Content() recomposes without another tile tap.
+            WwtApp.from(context).container.sessionBus.signedIn()
+            compose.onNodeWithTag("subapp.mail").assertIsDisplayed()
+            val after: Retained =
+                scopes.getOrPut(mailId) { error("mail scope should have been rebuilt by now") }
+
+            assertNotSame(
+                "sign-out must discard the retained mail scope so re-entry rebuilds it, " +
+                    "not re-attach the previous session's WebView",
+                before,
+                after,
+            )
         }
     }
 

@@ -18,7 +18,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -39,6 +41,25 @@ fun ShellScreen(container: AppContainer) {
     // the shell must fall back to the native login rather than sit on a dead token.
     val loggedIn by container.sessionBus.loggedIn.collectAsState()
     val sessionInvalidated by container.sessionBus.invalidated.collectAsState()
+
+    // Discard every sub-app's retained state (WebViews, session objects) on ANY
+    // signed-in -> signed-out transition, not just the deliberate one below: a server
+    // 401 calls auth.invalidate() from a background thread and flips loggedIn without
+    // ever running the signOut lambda. Declared here, above the `!loggedIn` branch, so
+    // it stays composed across the flip and actually observes the transition — an
+    // effect declared inside the signed-in branch below would be torn down (its
+    // LaunchedEffect body cancelled, never run to see `false`) the instant loggedIn
+    // flips, rather than reacting to it. `wasLoggedIn` guards against firing on a cold
+    // start that begins already signed out, when nothing is retained yet to discard.
+    // Redundant with (not a replacement for) the direct call in signOut below — that
+    // one runs synchronously on this same UI thread the moment the user asks, this one
+    // is the safety net for the path that never calls signOut at all. discardAll() is
+    // idempotent, so seeing both fire for a deliberate sign-out is harmless.
+    var wasLoggedIn by remember { mutableStateOf(loggedIn) }
+    LaunchedEffect(loggedIn) {
+        if (wasLoggedIn && !loggedIn) container.scopes.discardAll()
+        wasLoggedIn = loggedIn
+    }
 
     if (!loggedIn) {
         val vm = remember { LoginViewModel(container.auth, container.ssoLogin) }
@@ -149,6 +170,13 @@ fun ShellScreen(container: AppContainer) {
         }.start()
         // Flip the UI now; the thread above clears the token a moment later.
         container.sessionBus.signedOut()
+        // Discard retained sub-app state (WebViews, session objects) HERE, on this UI
+        // thread — WebView.destroy() must run on the thread that created the WebView,
+        // so this cannot wait for a background thread or be deferred. A scope that
+        // outlived sign-out would re-attach the previous user's live DOM/localStorage
+        // once a new session cookie is seeded, which is the security requirement this
+        // call exists to satisfy (see AppContainer.scopes and SubAppScopes' own KDoc).
+        container.scopes.discardAll()
     }
 
     Scaffold(

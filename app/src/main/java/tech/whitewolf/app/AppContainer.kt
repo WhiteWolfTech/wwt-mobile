@@ -63,7 +63,9 @@ class AppContainer(context: Context) {
     // Per-sub-app retained state (WebViews, session objects today). Handed to every
     // SubApp that needs to survive a launcher round-trip. Discarding on sign-out is a
     // security requirement (stale DOM/localStorage must not outlive the session that
-    // loaded it) but is Task 18's job, per the plan ledger — this container only owns it.
+    // loaded it) — wired in ShellScreen's signOut lambda (the deliberate path) and its
+    // loggedIn-observing LaunchedEffect (the involuntary 401-invalidation path); this
+    // container only owns the scopes themselves.
     val scopes = SubAppScopes()
 
     val lastUsedStore = LastUsedStore(AndroidPrefs(context.applicationContext))
