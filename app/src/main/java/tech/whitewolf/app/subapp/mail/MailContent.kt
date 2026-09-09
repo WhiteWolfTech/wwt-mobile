@@ -27,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -135,13 +136,26 @@ fun MailContent(
     // idempotent (clears `errored`, reloads), so at most one of the two ends up reloading
     // a page the other is also mid-reloading, which is harmless. Matches the original's
     // shape rather than inventing coordination between the two triggers.
+    //
+    // DisposableEffect(lifecycleOwner) re-registers only when lifecycleOwner itself
+    // changes (essentially never, for the hosting Activity), so the LifecycleEventObserver
+    // lambda below is created ONCE and closes over whatever it captures BY VALUE at that
+    // moment. `online` is a plain Boolean parameter — a raw capture would freeze it at
+    // MailContent's first composition and never see a later connectivity change, silently
+    // breaking exactly the resume-driven retry this effect exists to provide (or, the
+    // other direction, retrying while genuinely offline). rememberUpdatedState is the
+    // canonical fix: currentOnline always reads the LATEST `online` without forcing the
+    // observer to be torn down and re-registered on every connectivity flap. errored does
+    // NOT need this treatment — it is read via session.errored.value directly, the live
+    // source, rather than through the collectAsState() delegate above.
+    val currentOnline by rememberUpdatedState(online)
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 // Reopening the app is the natural "try again" moment: if the
                 // error screen is up and we're online, retry without waiting
                 // for the 30s tick.
-                if (errored && online) session.retry()
+                if (session.errored.value && currentOnline) session.retry()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
