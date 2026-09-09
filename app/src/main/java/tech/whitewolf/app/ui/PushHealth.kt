@@ -1,6 +1,5 @@
 package tech.whitewolf.app.ui
 
-import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -17,7 +16,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import tech.whitewolf.app.AppContainer
 import tech.whitewolf.app.WwtApp
-import tech.whitewolf.app.push.Notifications
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.push.PushStatus
 
@@ -40,6 +38,9 @@ fun rememberPushHealth(container: AppContainer, pushManager: PushManager): PushH
     val pushStatus by pushStatusBus.status.collectAsState()
     var notificationsEnabled by remember { mutableStateOf(true) }
 
+    val notificationManager = remember { NotificationManagerCompat.from(context) }
+    val registeredIds = remember { container.registry.ids().map { it.value } }
+
     // Re-drive push status from the current distributor state; also refresh whether WWT
     // can actually show notifications. Used on entry, resume, and the periodic poll.
     // forceFresh (resume only): in WrongServer, re-register from scratch — ntfy pins a
@@ -47,7 +48,20 @@ fun rememberPushHealth(container: AppContainer, pushManager: PushManager): PushH
     // so a plain register returns the stale endpoint forever after the user fixes the
     // server. unregister+register makes ntfy issue a fresh one against its current server.
     val recheck: (Boolean) -> Unit = { forceFresh ->
-        notificationsEnabled = areWwtNotificationsEnabled(context)
+        // Compute notifications enabled: app-level must be on, and no registered
+        // sub-app's channel can be blocked. A channel which does not exist yet
+        // counts as enabled (it is created on the first notification).
+        notificationsEnabled = if (!notificationManager.areNotificationsEnabled()) {
+            false
+        } else {
+            val blockedChannels = registeredIds
+                .mapNotNull { id ->
+                    val channel = notificationManager.getNotificationChannel(id)
+                    if (channel != null && channel.importance == NotificationManagerCompat.IMPORTANCE_NONE) id else null
+                }
+                .toSet()
+            !channelsBlocked(blockedChannels, registeredIds)
+        }
         when {
             !pushManager.hasDistributor() -> pushStatusBus.set(PushStatus.NoDistributor)
             forceFresh && pushStatusBus.status.value is PushStatus.WrongServer ->
@@ -99,18 +113,6 @@ fun rememberPushHealth(container: AppContainer, pushManager: PushManager): PushH
     }
 
     return PushHealth(pushStatus, notificationsEnabled)
-}
-
-/**
- * True when WWT can actually show notifications: app-level enabled AND the Mail channel
- * not blocked. A channel that doesn't exist yet counts as enabled (it is created on the
- * first notification).
- */
-private fun areWwtNotificationsEnabled(context: Context): Boolean {
-    val nm = NotificationManagerCompat.from(context)
-    if (!nm.areNotificationsEnabled()) return false
-    val channel = nm.getNotificationChannel(Notifications.CHANNEL_ID)
-    return channel == null || channel.importance != NotificationManagerCompat.IMPORTANCE_NONE
 }
 
 /**
