@@ -21,8 +21,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import tech.whitewolf.app.subapp.Retained
 import tech.whitewolf.app.subapp.SubAppId
+import tech.whitewolf.app.subapp.mail.MailScope
 
 /**
  * The route switch this task wires back up: the launcher shows one tile per registered
@@ -95,12 +95,19 @@ class ShellNavTest {
         // observable contract that matters: the retained mail scope is a DIFFERENT
         // instance after a sign-out/sign-in round trip, i.e. it was rebuilt, not reused.
         //
-        // scopes.getOrPut(id) { error(...) } is a safe, non-invasive way to PEEK at
-        // whatever is already retained without creating anything: the create lambda
-        // only runs when nothing is held. It only throws if mail's content has not
-        // actually composed (and retained a scope) by the point it is called, which
-        // both call sites below arrange for by asserting "subapp.mail" is displayed
-        // immediately before peeking.
+        // scopes.getOrPut<MailScope>(id) { throw AssertionError(...) } is a safe,
+        // non-invasive way to PEEK at whatever is already retained without creating
+        // anything: the create lambda only runs when nothing is held. The explicit
+        // <MailScope> type argument is load-bearing, not decoration: an earlier version
+        // of this test left T to be inferred from the lambda body alone (`error(...)`,
+        // which returns Nothing), so T resolved to Nothing rather than to Retained or
+        // MailScope. That compiled fine but could never pass either way — on a device,
+        // it threw KotlinNothingValueException on the SUCCESS path too, because the
+        // genuinely-retained MailScope still had to be cast to Nothing, which always
+        // fails. Pinning <MailScope> makes the cast target real, so it succeeds when an
+        // entry exists; the lambda still only runs (and now throws a plain
+        // AssertionError, so a genuine miss reports as a test failure rather than an
+        // IllegalStateException) when nothing is retained.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val scopes = WwtApp.from(context).container.scopes
         val mailId = SubAppId("mail")
@@ -108,8 +115,9 @@ class ShellNavTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithTag("tile.mail").performClick()
             compose.onNodeWithTag("subapp.mail").assertIsDisplayed()
-            val before: Retained =
-                scopes.getOrPut(mailId) { error("mail scope should already be retained") }
+            val before = scopes.getOrPut<MailScope>(mailId) {
+                throw AssertionError("mail scope should already be retained")
+            }
 
             compose.onNodeWithText("Sign out").performClick()
             // Confirms sign-out actually took effect (not just that discardAll() ran)
@@ -124,8 +132,9 @@ class ShellNavTest {
             // and mail's Content() recomposes without another tile tap.
             WwtApp.from(context).container.sessionBus.signedIn()
             compose.onNodeWithTag("subapp.mail").assertIsDisplayed()
-            val after: Retained =
-                scopes.getOrPut(mailId) { error("mail scope should have been rebuilt by now") }
+            val after = scopes.getOrPut<MailScope>(mailId) {
+                throw AssertionError("mail scope should have been rebuilt by now")
+            }
 
             assertNotSame(
                 "sign-out must discard the retained mail scope so re-entry rebuilds it, " +
