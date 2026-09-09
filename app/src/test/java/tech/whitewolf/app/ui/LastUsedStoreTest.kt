@@ -15,6 +15,7 @@ class LastUsedStoreTest {
     @Test fun roundTrips() {
         val p = MapPrefs()
         LastUsedStore(p).set(SubAppId("video"))
+        assertEquals("video", p.m["shell.lastUsed"])
         assertEquals(SubAppId("video"), LastUsedStore(p).get())
     }
 
