@@ -3,10 +3,13 @@ package tech.whitewolf.app.subapp.mail
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import kotlinx.coroutines.flow.StateFlow
 import tech.whitewolf.app.subapp.Retained
 import tech.whitewolf.app.subapp.SubApp
 import tech.whitewolf.app.subapp.SubAppHost
@@ -27,19 +30,18 @@ class MailScope(val session: MailWebSession) : Retained {
  * session) and again, once, inside the [scopes] `getOrPut` block that seeds the very
  * first session.
  *
- * [online] is a plain snapshot read, not a Compose-observed one: it is re-evaluated
- * whenever [Content] itself recomposes, but a StateFlow flip inside [MailContent] (e.g.
- * `session.errored`) does not by itself force this composable to recompose, so the
- * offline/online copy on the error screen can lag behind a real connectivity change until
- * something else (a route change, a push-status tick) causes [Content] to run again. Not
- * fixed here: matches [token]'s own "supplier now, `StateFlow` later" shape, which Task 19
- * is expected to widen for both.
+ * [online] supplies the live connectivity `StateFlow` (not a snapshot `Boolean`):
+ * [Content] collects it with `collectAsState()`, so a real connectivity change recomposes
+ * this composable directly — which both keeps the offline/online error copy live and lets
+ * [MailContent]'s own auto-retry effect (keyed on `errored`/`online`) actually observe an
+ * offline->online transition, rather than only whatever value happened to be current the
+ * last time [Content] recomposed for some unrelated reason.
  */
 class MailSubApp(
     private val url: String,
     private val scopes: SubAppScopes,
     private val token: () -> String?,
-    private val online: () -> Boolean,
+    private val online: () -> StateFlow<Boolean>,
 ) : SubApp {
     override val id = SubAppId("mail")
     override val title = "Mail"
@@ -49,12 +51,13 @@ class MailSubApp(
     override fun Content(host: SubAppHost, modifier: Modifier) {
         val ctx = LocalContext.current
         val scope = scopes.getOrPut(id) { MailScope(newSession(ctx, url, token())) }
+        val isOnline by online().collectAsState()
         MailContent(
             session = scope.session,
             url = url,
             sessionToken = token(),
             host = host,
-            online = online(),
+            online = isOnline,
             modifier = modifier.testTag("subapp.${id.value}"),
         )
     }

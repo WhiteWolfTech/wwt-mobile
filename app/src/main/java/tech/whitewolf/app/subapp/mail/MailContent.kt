@@ -25,15 +25,21 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import java.net.URI
+import kotlinx.coroutines.delay
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubAppHost
 import tech.whitewolf.app.web.NavPolicy
@@ -44,6 +50,10 @@ private const val WAKE_JS = "window.wwtWake && window.wwtWake()"
 // Spinner runtime for the wake-refresh path: the SPA gives no completion
 // signal, and its refresh fetch is fast — a fixed short spin reads as "done".
 private const val REFRESH_SPINNER_MS = 800L
+
+// Offline-aware auto-retry cadence (docs/superpowers/specs/2026-07-07-offline-error-
+// handling-design.md): how often to retry while online and the error screen is up.
+private const val ERROR_RETRY_MS = 30_000L
 
 /**
  * Whether mail's own back handler should be armed. History back is suppressed while the
@@ -64,6 +74,12 @@ internal fun mailBackEnabled(canGoBack: Boolean, errored: Boolean): Boolean =
  * singleton for its own dependencies (that reappears as a hidden shell coupling this
  * package exists to remove). The caller (Task 9's `MailSubApp`) reads it from
  * `AppContainer.auth`; a later task widens this to a `StateFlow<String?>` for refresh.
+ *
+ * [online] must be a live, Compose-observed value (the caller collects a connectivity
+ * `StateFlow` before calling in), not a one-off snapshot — the offline-aware auto-retry
+ * below is keyed on it and needs to see a real offline->online transition, not just
+ * whatever value happened to be current the last time this composable's caller recomposed
+ * for some unrelated reason.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -109,6 +125,26 @@ fun MailContent(
         }
     }
 
+    // Offline-aware auto-retry (docs/superpowers/specs/2026-07-07-offline-error-handling-
+    // design.md): a load failure no longer latches forever. Immediate retry when a usable
+    // connection (re)appears; every ERROR_RETRY_MS while online (short server blips);
+    // never while offline. Each retry waits for RESUMED so nothing reloads from the
+    // background. session.retry() clears `errored` BEFORE reloading, so a repeat failure
+    // is a false->true transition this effect's key sees — not true->true, which a plain
+    // StateFlow write would dedupe away and this effect would never restart from.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var wasOnline by remember { mutableStateOf(online) }
+    LaunchedEffect(errored, online) {
+        val cameOnline = online && !wasOnline
+        wasOnline = online
+        if (!errored || !online) return@LaunchedEffect
+        if (!cameOnline) delay(ERROR_RETRY_MS)
+        while (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            delay(ERROR_RETRY_MS)
+        }
+        session.retry()
+    }
+
     if (errored) {
         Column(
             modifier = modifier.fillMaxSize(),
@@ -117,7 +153,7 @@ fun MailContent(
         ) {
             Text(errorMessageFor(online, "Mail"))
             Button(
-                onClick = { session.web.reload() },
+                onClick = { session.retry() },
                 modifier = Modifier.padding(top = 12.dp).testTag("retry"),
             ) { Text("Retry") }
         }

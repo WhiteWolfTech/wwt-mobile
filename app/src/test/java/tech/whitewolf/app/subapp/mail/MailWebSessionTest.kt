@@ -133,4 +133,19 @@ class MailWebSessionTest {
 
         assertFalse(s.errored.value)
     }
+
+    @Test fun retryClearsTheErrorAndReloads() {
+        // Clearing errored optimistically (not waiting for a callback) matters: a REPEAT
+        // failure must be a false->true transition, not true->true, or a Compose effect
+        // keyed on `errored` (the auto-retry loop) would never see it change and restart.
+        val web = FakeWeb()
+        val s = MailWebSession(web)
+        s.notifyMainFrameError()
+        assertTrue(s.errored.value)
+
+        s.retry()
+
+        assertFalse(s.errored.value)
+        assertEquals(1, web.reloads)
+    }
 }

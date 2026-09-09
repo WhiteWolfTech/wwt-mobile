@@ -50,12 +50,18 @@ class AppContainer(context: Context) {
     )
     val pushEndpointStore = tech.whitewolf.app.push.PushEndpointStore(secureStore)
 
-    // Reachability for a sub-app's offline/online error copy. A container-level
-    // singleton (not per-composition, the way ShellScreen used to own one): a sub-app is
-    // CONSTRUCTED with what it needs, and MailSubApp needs this before any Compose tree
-    // exists. Started once, here, and never stopped — AppContainer is itself a
-    // process-scoped singleton (WwtApp.container is `by lazy`), so there is no narrower
-    // lifecycle to tie it to.
+    // Reachability for a sub-app's offline/online error copy. A container-level (shell-
+    // level) singleton, not per-composition the way ShellScreen used to own one: a sub-app
+    // is CONSTRUCTED with what it needs, and MailSubApp needs this before any Compose tree
+    // exists — and the next hosted-web sub-app will need this exact same instance too, so
+    // it belongs at the shell, not duplicated per sub-app.
+    //
+    // Deliberately process-scoped and NEVER STOPPED — this is not a leak to fix later.
+    // AppContainer itself is a process-scoped singleton (WwtApp.container is `by lazy`,
+    // constructed once and held for the process's life), so there is no narrower owner to
+    // call stop() from; a single network callback registration living as long as the
+    // process it monitors is the correct shape here, matching sessionBus/pushStatusBus
+    // elsewhere in this class, neither of which has a shutdown path either.
     val connectivity = ConnectivityMonitor(context.applicationContext).also { it.start() }
 
     // Per-sub-app retained state (WebViews, session objects today). Handed to every
@@ -75,7 +81,7 @@ class AppContainer(context: Context) {
                     url = mail.url,
                     scopes = scopes,
                     token = { auth.currentToken() },
-                    online = { connectivity.online.value },
+                    online = { connectivity.online },
                 ),
                 push = null,
             ),

@@ -89,6 +89,18 @@ class MailWebSession(val web: WebViewHandle) {
         listener?.onMainFrameError()
     }
 
+    /**
+     * Retry after a load failure: clears [errored] optimistically, before reloading,
+     * rather than waiting for [notifyPageFinished]/[notifyMainFrameError] to report back.
+     * A REPEAT failure then sets `_errored` true->false->true rather than true->true, so a
+     * Compose effect keyed on `errored` (MailContent's auto-retry) sees a real transition
+     * and restarts instead of silently doing nothing because the StateFlow never changed.
+     */
+    fun retry() {
+        _errored.value = false
+        web.reload()
+    }
+
     fun destroy() {
         unbind()
         web.destroy()
