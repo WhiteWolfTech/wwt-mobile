@@ -17,3 +17,8 @@ local.properties
 
 # SDD scratch (ledger/reports) — never commit
 .superpowers/
+
+# Credential env files — never commit. The BrowserStack runner reads
+# ~/.browserstack.env from OUTSIDE the repo; this stops a stray copy landing here.
+.env
+*.env
