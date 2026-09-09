@@ -1,5 +1,7 @@
 package tech.whitewolf.app.subapp
 
+import android.util.Log
+
 /** Something a sub-app keeps across a launcher round-trip and must release on discard. */
 interface Retained {
     fun onDiscard()
@@ -23,12 +25,21 @@ class SubAppScopes {
         held.getOrPut(id, create) as T
 
     fun discard(id: SubAppId) {
-        held.remove(id)?.onDiscard()
+        val item = held.remove(id)
+        if (item != null) {
+            runCatching { item.onDiscard() }.onFailure {
+                Log.w("SubAppScopes", "Error discarding $id", it)
+            }
+        }
     }
 
     fun discardAll() {
         val all = held.values.toList()
         held.clear()
-        all.forEach { it.onDiscard() }
+        all.forEach { item ->
+            runCatching { item.onDiscard() }.onFailure {
+                Log.w("SubAppScopes", "Error during discardAll", it)
+            }
+        }
     }
 }
