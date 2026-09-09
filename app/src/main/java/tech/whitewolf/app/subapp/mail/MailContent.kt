@@ -104,12 +104,12 @@ fun MailContent(
     BackHandler(enabled = mailBackEnabled(canGoBack, errored)) { session.web.goBack() }
 
     // Re-entering composition (from the launcher, or another sub-app) primes state from
-    // the live view and resumes JS timers; leaving pauses them. The listener is unbound
-    // on the way out so a dead composition never receives a late callback.
+    // the live view and resumes JS timers; leaving pauses them. State is observed via
+    // collectAsState() above, not a bound listener callback, so there is nothing to
+    // unbind on the way out.
     DisposableEffect(session) {
         session.onAttached()
         onDispose {
-            session.unbind()
             session.onDetached()
         }
     }

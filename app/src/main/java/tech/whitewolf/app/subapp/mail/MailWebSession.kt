@@ -15,19 +15,15 @@ interface WebViewHandle {
     fun destroy()
 }
 
-/** Callbacks a composition binds while it is on screen. */
-interface SessionListener {
-    fun onPageFinished()
-    fun onHistoryChanged(canGoBack: Boolean)
-    fun onMainFrameError()
-}
-
 /**
  * The retained half of a hosted web sub-app: the WebView plus the state its client
  * writes. Retaining a bare WebView does not work — its WebViewClient closures capture
  * composable-local state, so re-attaching into a fresh composition leaves the client
  * writing to a dead composition (canGoBack resets, pull-to-refresh sees pageLoaded=false
- * and reloads). Here the state lives with the session and the listener is rebound.
+ * and reloads). Here the state lives with the session, exposed as StateFlows a
+ * composition observes with `collectAsState()` — not a listener callback: MailContent
+ * never actually calls a `bind()`, so a prior SessionListener/bind/unbind here was dead
+ * production code, exercised only by tests that existed to exercise it.
  */
 class MailWebSession(val web: WebViewHandle) {
     /**
@@ -55,12 +51,6 @@ class MailWebSession(val web: WebViewHandle) {
     private val _errored = MutableStateFlow(false)
     val errored: StateFlow<Boolean> = _errored
 
-    @Volatile private var listener: SessionListener? = null
-
-    fun bind(l: SessionListener) { listener = l }
-
-    fun unbind() { listener = null }
-
     /** Re-entering composition: prime from the live view, resume timers. */
     fun onAttached() {
         _canGoBack.value = web.canGoBack()
@@ -75,18 +65,14 @@ class MailWebSession(val web: WebViewHandle) {
     fun notifyPageFinished() {
         _pageLoaded.value = true
         _errored.value = false
-        listener?.onPageFinished()
     }
 
     fun notifyHistoryChanged() {
-        val v = web.canGoBack()
-        _canGoBack.value = v
-        listener?.onHistoryChanged(v)
+        _canGoBack.value = web.canGoBack()
     }
 
     fun notifyMainFrameError() {
         _errored.value = true
-        listener?.onMainFrameError()
     }
 
     /**
@@ -102,7 +88,6 @@ class MailWebSession(val web: WebViewHandle) {
     }
 
     fun destroy() {
-        unbind()
         web.destroy()
     }
 }
