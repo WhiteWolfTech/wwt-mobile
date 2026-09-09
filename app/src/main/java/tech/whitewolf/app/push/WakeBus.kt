@@ -2,6 +2,7 @@ package tech.whitewolf.app.push
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import tech.whitewolf.app.subapp.SubAppId
 import java.util.concurrent.ConcurrentHashMap
 
@@ -37,7 +38,6 @@ class WakeBus {
 
     /** A wake arrived for [id], whether or not it also raised a notification. */
     fun signal(id: SubAppId) {
-        val f = flow(id)
-        synchronized(f) { f.value = f.value + 1 }
+        flow(id).update { it + 1 }
     }
 }
