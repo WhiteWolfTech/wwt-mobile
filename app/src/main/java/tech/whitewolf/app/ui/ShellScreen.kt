@@ -63,9 +63,12 @@ fun ShellScreen(container: AppContainer) {
     }
 
     val subApp = remember { mailTarget() }
-    // loading/errored are wired to the hosted content in Task 9; MailContent now owns
-    // both the WebView and the error screen (subapp/mail/MailContent.kt), so nothing in
-    // this file currently flips either flag — loading spins forever until that lands.
+    // BROKEN ON PURPOSE, TEMPORARILY: mail content and its error screen moved to
+    // subapp/mail/MailContent.kt (Task 8), and Task 9 is what calls it from here. Until
+    // that lands, nothing in this file ever flips `errored`, so the resume-retry and the
+    // auto-retry LaunchedEffect below are dead, and `loading` never turns false — the
+    // content area renders NOTHING but a spinner that spins forever. This is not a bug to
+    // chase; it is the expected state of this branch between Task 8 and Task 9.
     var loading by remember { mutableStateOf(true) }
     var errored by remember { mutableStateOf(false) }
     val retry: () -> Unit = { errored = false; loading = true }
@@ -212,8 +215,11 @@ fun ShellScreen(container: AppContainer) {
                 PushStatusBanner(content = bannerContent)
             }
             Box(modifier = Modifier.fillMaxSize().weight(1f)) {
-                // The hosted-content call (subapp/mail/MailContent.kt) and its error
-                // screen are wired here in Task 9 — see the note by `loading` above.
+                // Mail content is NOT rendered here yet. Task 9 replaces this whole
+                // `if (loading)` block with the `MailContent` call (subapp/mail/
+                // MailContent.kt) plus wherever it decides the loading indicator should
+                // live — see the note by `loading` above for why this spins forever
+                // in the meantime.
                 if (loading) {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center).testTag("progress"),

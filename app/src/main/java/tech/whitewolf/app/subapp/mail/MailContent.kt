@@ -34,7 +34,6 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import java.net.URI
-import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubAppHost
 import tech.whitewolf.app.web.NavPolicy
@@ -60,12 +59,18 @@ internal fun mailBackEnabled(canGoBack: Boolean, errored: Boolean): Boolean =
  * fresh composition (leaving the launcher and coming back) does not lose history tracking
  * or replay a stale reload. Deliberately mail-shaped, not a generic web-content composable
  * — a second web-hosted sub-app can generalise this one.
+ *
+ * [sessionToken] is CONSTRUCTED in, not fetched: a sub-app must not reach into the app
+ * singleton for its own dependencies (that reappears as a hidden shell coupling this
+ * package exists to remove). The caller (Task 9's `MailSubApp`) reads it from
+ * `AppContainer.auth`; a later task widens this to a `StateFlow<String?>` for refresh.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MailContent(
     session: MailWebSession,
     url: String,
+    sessionToken: String?,
     host: SubAppHost,
     online: Boolean,
     modifier: Modifier,
@@ -126,7 +131,7 @@ fun MailContent(
                 // a parent" — detach first.
                 session.container?.also { existing ->
                     (existing.parent as? ViewGroup)?.removeView(existing)
-                } ?: buildContainer(ctx, session, url).also { session.container = it }
+                } ?: buildContainer(ctx, session, url, sessionToken).also { session.container = it }
             },
         )
     }
@@ -135,13 +140,22 @@ fun MailContent(
 /** The existing WebView + SwipeRefreshLayout construction, moved verbatim from
  *  ui/SubAppWebView.kt. Runs once per session — on re-attach [MailContent] returns the
  *  retained [MailWebSession.container] instead of calling this again. */
-private fun buildContainer(ctx: Context, session: MailWebSession, url: String): SwipeRefreshLayout {
+private fun buildContainer(
+    ctx: Context,
+    session: MailWebSession,
+    url: String,
+    sessionToken: String?,
+): SwipeRefreshLayout {
     val bridge = ShellBridge()
     var refreshLayout: SwipeRefreshLayout? = null
-    // session.web already wraps the WebView this session drives (constructed alongside
-    // the session so MailWebSession's delegation and the on-screen view stay the same
-    // object); AndroidWebViewHandle exposes it because WebViewHandle deliberately does
-    // not carry settings/webViewClient/the JS interface.
+    // session.web already wraps the WebView this session drives, and the cast below is
+    // safe rather than defensive: MailSubApp constructs the AndroidWebViewHandle and the
+    // MailWebSession together (Task 9), so the two can never disagree here — a mismatch
+    // fails loudly at that construction site, not silently at this cast. WebViewHandle
+    // itself stays narrow (canGoBack/goBack/reload/loadUrl/evaluateJavascript/pause/
+    // resume/destroy) so MailWebSession is JVM-testable with a fake; MailContent is
+    // Compose UI and isn't JVM-testable regardless, so it — not the shared interface —
+    // is where the concrete View type belongs.
     val wv = (session.web as AndroidWebViewHandle).view
     val allowedHost = URI(url).host ?: ""
 
@@ -214,10 +228,9 @@ private fun buildContainer(ctx: Context, session: MailWebSession, url: String): 
         // avoid a race between seeding and the first request.
         val cm = CookieManager.getInstance()
         cm.setAcceptCookie(true)
-        val token = WwtApp.from(ctx).container.auth.currentToken()
-        session.seededToken = token
-        if (token != null) {
-            cm.setCookie(url, sessionCookieLine(token)) {
+        session.seededToken = sessionToken
+        if (sessionToken != null) {
+            cm.setCookie(url, sessionCookieLine(sessionToken)) {
                 cm.flush()
                 loadUrl(url)
             }
