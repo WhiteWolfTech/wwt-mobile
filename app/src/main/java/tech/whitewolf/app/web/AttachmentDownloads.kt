@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -117,8 +118,12 @@ internal class DownloadGeneration {
 
 /**
  * What sign-out removes beyond the session itself (WWT-238): downloaded attachments
- * (and any still in flight), and Chromium's HTTP disk cache, which holds rendered
- * mail bodies and images and otherwise outlives the WebView — and app restarts.
+ * (and any still in flight); Chromium's HTTP disk cache, which holds rendered mail
+ * bodies and images and otherwise outlives the WebView — and app restarts; and the
+ * WebView's DOM storage, where the mail SPA keeps unsent compose drafts. Discarding
+ * the WebView does not clear that: localStorage belongs to the app's WebView profile,
+ * so without this the next person to sign in on the phone inherits the draft text.
+ * Unsent drafts are therefore lost on sign-out — deliberately (Peter, 2026-09-30).
  * Must run on the main thread: it briefly creates a WebView (clearCache needs an
  * instance, and the cache is shared by every WebView in the process, so this works
  * whether or not mail was opened).
@@ -127,6 +132,7 @@ fun purgeSignedOutData(ctx: Context) {
     val app = ctx.applicationContext
     AttachmentDownloads.generation.invalidate()
     Thread { AttachmentStore.of(app).clear() }.start()
+    WebStorage.getInstance().deleteAllData()
     // A WebView cannot be created while Android System WebView is mid-update; that
     // must not crash sign-out, which has already started clearing the session.
     runCatching { WebView(ctx).apply { clearCache(true) }.destroy() }
