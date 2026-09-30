@@ -13,6 +13,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -44,7 +45,9 @@ import java.net.URI
 import kotlinx.coroutines.delay
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubAppHost
+import tech.whitewolf.app.web.DownloadPolicy
 import tech.whitewolf.app.web.NavPolicy
+import tech.whitewolf.app.web.enqueueDownload
 import tech.whitewolf.app.web.ShellBridge
 
 private const val WAKE_JS = "window.wwtWake && window.wwtWake()"
@@ -274,6 +277,28 @@ private fun buildContainer(
         // Main-frame navigation is pinned to allowedHost by NavPolicy, and the
         // interface carries a single boolean — no data is exposed.
         addJavascriptInterface(bridge, "WwtShell")
+
+        // Attachment links (WWT-238). The server sends them as downloads, and a
+        // WebView silently drops a download no one handles — so every attachment
+        // link did nothing in the app. DownloadPolicy refuses anything off the
+        // mail origin (the request carries the session cookie); the system
+        // DownloadManager then fetches it, and its notification opens the file.
+        setDownloadListener { dlUrl, userAgent, contentDisposition, mimeType, _ ->
+            val plan = DownloadPolicy.plan(dlUrl, contentDisposition, mimeType, allowedHost)
+            if (plan == null) {
+                Log.w("MailContent", "Refused download outside the mail origin: $dlUrl")
+                return@setDownloadListener
+            }
+            try {
+                enqueueDownload(ctx, plan, userAgent)
+                Toast.makeText(ctx, "Downloading ${plan.fileName}", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                // No DownloadManager (disabled system app) or a rejected request:
+                // say so rather than fail silently, which is the bug being fixed.
+                Log.w("MailContent", "Download failed to start: $dlUrl", e)
+                Toast.makeText(ctx, "Couldn't download ${plan.fileName}", Toast.LENGTH_LONG).show()
+            }
+        }
 
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
