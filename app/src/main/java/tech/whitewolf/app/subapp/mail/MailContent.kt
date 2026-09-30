@@ -44,6 +44,8 @@ import java.net.URI
 import kotlinx.coroutines.delay
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubAppHost
+import tech.whitewolf.app.web.AttachmentDownloads
+import tech.whitewolf.app.web.DownloadPolicy
 import tech.whitewolf.app.web.NavPolicy
 import tech.whitewolf.app.web.ShellBridge
 
@@ -274,6 +276,20 @@ private fun buildContainer(
         // Main-frame navigation is pinned to allowedHost by NavPolicy, and the
         // interface carries a single boolean — no data is exposed.
         addJavascriptInterface(bridge, "WwtShell")
+
+        // Attachment links (WWT-238). The server sends them as downloads, and a
+        // WebView silently drops a download no one handles — so every attachment
+        // link did nothing in the app. DownloadPolicy refuses anything but the mail
+        // host (the fetch carries the session cookie); the file is fetched into
+        // app-private storage and opened in a viewer the user picks.
+        setDownloadListener { dlUrl, userAgent, contentDisposition, mimeType, _ ->
+            val plan = DownloadPolicy.plan(dlUrl, contentDisposition, mimeType, allowedHost)
+            if (plan == null) {
+                Log.w("MailContent", "Refused download outside the mail host: $dlUrl")
+                return@setDownloadListener
+            }
+            AttachmentDownloads.start(ctx, plan, userAgent)
+        }
 
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(

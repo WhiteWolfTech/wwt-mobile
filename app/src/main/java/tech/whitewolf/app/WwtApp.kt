@@ -7,6 +7,7 @@ import android.os.Bundle
 import tech.whitewolf.app.push.PushStatusBus
 import tech.whitewolf.app.push.VisibleRoute
 import tech.whitewolf.app.push.WakeBus
+import tech.whitewolf.app.web.AttachmentStore
 
 /**
  * Process root: one shared AppContainer (so receivers/activities don't each build
@@ -23,6 +24,9 @@ class WwtApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Downloaded attachments are kept for a week at most (WWT-238); sign-out
+        // clears them all (purgeSignedOutData). Off the main thread: it is disk I/O.
+        Thread { AttachmentStore.of(this).pruneOlderThan(System.currentTimeMillis(), AttachmentStore.MAX_AGE_MS) }.start()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { foreground.onStart() }
             override fun onActivityStopped(activity: Activity) { foreground.onStop() }

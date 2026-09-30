@@ -32,6 +32,7 @@ import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.subapp.SubAppRegistry
+import tech.whitewolf.app.web.purgeSignedOutData
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +42,7 @@ fun ShellScreen(container: AppContainer) {
     // the shell must fall back to the native login rather than sit on a dead token.
     val loggedIn by container.sessionBus.loggedIn.collectAsState()
     val sessionInvalidated by container.sessionBus.invalidated.collectAsState()
+    val context = LocalContext.current
 
     // Discard every sub-app's retained state (WebViews, session objects) on ANY
     // signed-in -> signed-out transition, not just the deliberate one below: a server
@@ -57,7 +59,11 @@ fun ShellScreen(container: AppContainer) {
     // idempotent, so seeing both fire for a deliberate sign-out is harmless.
     var wasLoggedIn by remember { mutableStateOf(loggedIn) }
     LaunchedEffect(loggedIn) {
-        if (wasLoggedIn && !loggedIn) container.scopes.discardAll()
+        if (wasLoggedIn && !loggedIn) {
+            container.scopes.discardAll()
+            // Downloaded attachments, the WebView's disk cache and its DOM storage (drafts) go too (WWT-238).
+            purgeSignedOutData(context)
+        }
         wasLoggedIn = loggedIn
     }
 
@@ -75,7 +81,6 @@ fun ShellScreen(container: AppContainer) {
         return
     }
 
-    val context = LocalContext.current
     val vm: ShellViewModel = viewModel(
         factory = ShellViewModelFactory(container, WwtApp.from(context).wakeBus),
     )
@@ -177,6 +182,9 @@ fun ShellScreen(container: AppContainer) {
         // once a new session cookie is seeded, which is the security requirement this
         // call exists to satisfy (see AppContainer.scopes and SubAppScopes' own KDoc).
         container.scopes.discardAll()
+        // Downloaded attachments, the WebView's disk cache and its DOM storage (drafts) are purged by the
+        // LaunchedEffect(loggedIn) above, which signedOut() has just triggered — once,
+        // for this path and the background-401 path alike (WWT-238).
     }
 
     Scaffold(

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WWT-238: the only files the app shares — downloaded attachments in its private
+     cache, handed to a viewer one at a time with a temporary read grant. -->
+<paths>
+    <cache-path name="attachments" path="attachments/" />
+</paths>
