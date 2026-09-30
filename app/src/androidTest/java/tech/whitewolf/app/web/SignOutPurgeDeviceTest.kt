@@ -46,7 +46,10 @@ class SignOutPurgeDeviceTest {
     }
 
     @Test fun signOutPurgeRemovesStoredDrafts() {
-        val stored = runInPage("localStorage.setItem('wwt.draft.1', 'unsent text')", "localStorage.getItem('wwt.draft.1')")
+        runInPage("localStorage.setItem('wwt.draft.1', 'unsent text')", "1")
+        // Read back from a SECOND WebView, so the precondition proves the draft
+        // persisted to storage rather than sitting in the first renderer's cache.
+        val stored = runInPage("", "localStorage.getItem('wwt.draft.1')")
         assertEquals("precondition: the draft is stored", "\"unsent text\"", stored)
 
         instr.runOnMainSync { purgeSignedOutData(ctx) }

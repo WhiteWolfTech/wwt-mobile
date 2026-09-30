@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import tech.whitewolf.app.web.purgeSignedOutData
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -33,6 +32,7 @@ import tech.whitewolf.app.WwtApp
 import tech.whitewolf.app.auth.LoginViewModel
 import tech.whitewolf.app.push.PushManager
 import tech.whitewolf.app.subapp.SubAppRegistry
+import tech.whitewolf.app.web.purgeSignedOutData
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,7 +61,7 @@ fun ShellScreen(container: AppContainer) {
     LaunchedEffect(loggedIn) {
         if (wasLoggedIn && !loggedIn) {
             container.scopes.discardAll()
-            // Downloaded attachments and the WebView's disk cache go too (WWT-238).
+            // Downloaded attachments, the WebView's disk cache and its DOM storage (drafts) go too (WWT-238).
             purgeSignedOutData(context)
         }
         wasLoggedIn = loggedIn
@@ -182,7 +182,7 @@ fun ShellScreen(container: AppContainer) {
         // once a new session cookie is seeded, which is the security requirement this
         // call exists to satisfy (see AppContainer.scopes and SubAppScopes' own KDoc).
         container.scopes.discardAll()
-        // Downloaded attachments and the WebView's disk cache are purged by the
+        // Downloaded attachments, the WebView's disk cache and its DOM storage (drafts) are purged by the
         // LaunchedEffect(loggedIn) above, which signedOut() has just triggered — once,
         // for this path and the background-401 path alike (WWT-238).
     }

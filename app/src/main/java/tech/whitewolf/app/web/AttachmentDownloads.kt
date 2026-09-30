@@ -122,8 +122,10 @@ internal class DownloadGeneration {
  * bodies and images and otherwise outlives the WebView — and app restarts; and the
  * WebView's DOM storage, where the mail SPA keeps unsent compose drafts. Discarding
  * the WebView does not clear that: localStorage belongs to the app's WebView profile,
- * so without this the next person to sign in on the phone inherits the draft text.
- * Unsent drafts are therefore lost on sign-out — deliberately (Peter, 2026-09-30).
+ * so without this the signed-out user's unsent text stays at rest on the phone (the
+ * SPA keys drafts per user, so another account would not see it in the UI, but it is
+ * still there). Unsent drafts are therefore lost on sign-out — deliberately (Peter,
+ * 2026-09-30).
  * Must run on the main thread: it briefly creates a WebView (clearCache needs an
  * instance, and the cache is shared by every WebView in the process, so this works
  * whether or not mail was opened).
@@ -132,9 +134,11 @@ fun purgeSignedOutData(ctx: Context) {
     val app = ctx.applicationContext
     AttachmentDownloads.generation.invalidate()
     Thread { AttachmentStore.of(app).clear() }.start()
-    WebStorage.getInstance().deleteAllData()
-    // A WebView cannot be created while Android System WebView is mid-update; that
-    // must not crash sign-out, which has already started clearing the session.
-    runCatching { WebView(ctx).apply { clearCache(true) }.destroy() }
-        .onFailure { Log.w("purgeSignedOutData", "Could not clear the WebView cache", it) }
+    // Neither WebStorage nor a WebView can be obtained while Android System WebView
+    // is mid-update (both go through WebViewFactory); that must not crash sign-out,
+    // which has already started clearing the session.
+    runCatching {
+        WebStorage.getInstance().deleteAllData()
+        WebView(ctx).apply { clearCache(true) }.destroy()
+    }.onFailure { Log.w("purgeSignedOutData", "Could not clear WebView storage/cache", it) }
 }
