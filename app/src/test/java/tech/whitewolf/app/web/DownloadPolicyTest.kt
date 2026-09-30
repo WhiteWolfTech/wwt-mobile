@@ -2,9 +2,10 @@ package tech.whitewolf.app.web
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-// WWT-238: what the WebView's download listener hands Android's DownloadManager.
+// WWT-238: whether the WebView's download listener may fetch an attachment, and under what name.
 class DownloadPolicyTest {
     private val host = "mail.whitewolf.tech"
     private val url = "https://mail.whitewolf.tech/api/messages/7/attachments/3"
@@ -22,6 +23,12 @@ class DownloadPolicyTest {
     @Test fun sharedMailboxAttachmentIsPlanned() {
         val shared = "https://mail.whitewolf.tech/api/mailboxes/13/messages/7/attachments/3"
         assertEquals("report.pdf", plan(u = shared)?.fileName)
+    }
+
+    // Exactly the mail origin: the session cookie is host-only, so a subdomain
+    // would get no session anyway, and nothing else should be fetched on its behalf.
+    @Test fun subdomainIsRefused() {
+        assertNull(plan(u = "https://x.mail.whitewolf.tech/api/messages/7/attachments/3"))
     }
 
     // Only the app's own origin, over HTTPS: a page must not be able to make the
@@ -70,11 +77,37 @@ class DownloadPolicyTest {
         assertEquals("attachment", plan(disposition = "attachment; filename=\"   \"")?.fileName)
     }
 
-    @Test fun overlongNameIsTruncatedKeepingTheExtension() {
+    // Filesystems limit a name to 255 BYTES, not characters.
+    @Test fun overlongNameIsTruncatedByBytesKeepingTheExtension() {
         val long = "a".repeat(300) + ".pdf"
         val name = plan(disposition = "attachment; filename=$long")!!.fileName
-        assertEquals(true, name.length <= 120)
-        assertEquals(true, name.endsWith(".pdf"))
+        assertTrue(name.toByteArray(Charsets.UTF_8).size <= 200)
+        assertTrue(name.endsWith(".pdf"))
+    }
+
+    @Test fun overlongMultibyteNameStaysUnderTheByteLimit() {
+        val enc = "%E6%97%A5".repeat(130) // 130 x 日 = 390 bytes
+        val name = plan(disposition = "attachment; filename*=utf-8''$enc.txt")!!.fileName
+        assertTrue(name.toByteArray(Charsets.UTF_8).size <= 200)
+        assertTrue(name.endsWith(".txt"))
+        assertTrue(name.removeSuffix(".txt").all { it == '日' })
+    }
+
+    // A cut must never split a surrogate pair into an invalid string.
+    @Test fun truncationKeepsEmojiWhole() {
+        val enc = "%F0%9F%93%8E".repeat(60) // 60 x paperclip = 240 bytes
+        val name = plan(disposition = "attachment; filename*=utf-8''$enc.pdf")!!.fileName
+        assertTrue(name.toByteArray(Charsets.UTF_8).size <= 200)
+        assertTrue(name.removeSuffix(".pdf").codePoints().allMatch { it == 0x1F4CE })
+    }
+
+    // Go's quoted form escapes only " and \.
+    @Test fun quotedPairsAreUnescaped() {
+        assertEquals("he said \"hi\".pdf", plan(disposition = "attachment; filename=\"he said \\\"hi\\\".pdf\"")?.fileName)
+    }
+
+    @Test fun nonUtf8ExtValueFallsBackToPlainFilename() {
+        assertEquals("plain.pdf", plan(disposition = "attachment; filename=plain.pdf; filename*=iso-8859-1''caf%E9.pdf")?.fileName)
     }
 
     @Test fun blankMimeTypeIsNull() {

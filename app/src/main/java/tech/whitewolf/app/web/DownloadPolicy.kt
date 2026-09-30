@@ -1,8 +1,9 @@
 package tech.whitewolf.app.web
 
 import java.io.ByteArrayOutputStream
+import java.net.URI
 
-/** What to hand Android's DownloadManager for one WebView download. */
+/** One attachment download the WebView asked for, approved and named. */
 data class DownloadPlan(val url: String, val fileName: String, val mimeType: String?)
 
 /**
@@ -13,16 +14,19 @@ data class DownloadPlan(val url: String, val fileName: String, val mimeType: Str
  */
 object DownloadPolicy {
     private const val FALLBACK_NAME = "attachment"
-    private const val MAX_NAME = 120
+    // Bytes, not characters: filesystems cap a name at 255 bytes, and a
+    // multibyte name hits that long before 255 characters. Headroom for the
+    // "-N" suffix AttachmentStore adds on a collision.
+    private const val MAX_NAME_BYTES = 200
 
     /**
-     * A plan, or null to refuse. Only the sub-app's own origin over HTTPS is
-     * allowed — the same rule [NavPolicy] applies to navigation — because the
-     * download carries the user's session cookie: a page must not be able to point
-     * it anywhere else.
+     * A plan, or null to refuse. Only exactly the mail host over HTTPS: the fetch
+     * carries the user's session cookie, so a page must not be able to point it
+     * anywhere else. Stricter than [NavPolicy], which also admits subdomains —
+     * the session cookie is host-only, so a subdomain would have no session.
      */
     fun plan(url: String, contentDisposition: String?, mimeType: String?, allowedHost: String): DownloadPlan? {
-        if (!NavPolicy.isInApp(url, allowedHost)) return null
+        if (!isExactlyHost(url, allowedHost)) return null
         return DownloadPlan(url, fileName(contentDisposition), mimeType?.takeIf { it.isNotBlank() })
     }
 
@@ -33,6 +37,12 @@ object DownloadPolicy {
      * The name comes from whoever sent the mail, so path separators and control
      * characters are removed rather than trusted.
      */
+    private fun isExactlyHost(url: String, allowedHost: String): Boolean {
+        val uri = try { URI(url) } catch (e: Exception) { return false }
+        if (uri.scheme?.lowercase() != "https" || uri.rawUserInfo != null) return false
+        return uri.host?.lowercase()?.trimEnd('.') == allowedHost.lowercase()
+    }
+
     internal fun fileName(contentDisposition: String?): String {
         val params = contentDisposition?.let(::parameters).orEmpty()
         val raw = params["filename*"]?.let(::decodeExtValue) ?: params["filename"]
@@ -47,13 +57,27 @@ object DownloadPolicy {
         return truncate(clean)
     }
 
-    // Keep the extension when shortening, so the file still opens in the right app.
+    // Keep the extension when shortening, so the file still opens in the right
+    // app, and cut only between code points, so no surrogate pair is split.
     private fun truncate(name: String): String {
-        if (name.length <= MAX_NAME) return name
+        if (utf8Len(name) <= MAX_NAME_BYTES) return name
         val dot = name.lastIndexOf('.')
         val ext = if (dot > 0 && name.length - dot <= 10) name.substring(dot) else ""
-        return name.substring(0, MAX_NAME - ext.length) + ext
+        val budget = MAX_NAME_BYTES - utf8Len(ext)
+        val stem = StringBuilder()
+        var used = 0
+        var i = 0
+        while (i < name.length - ext.length) {
+            val cp = name.codePointAt(i)
+            val len = utf8Len(String(Character.toChars(cp)))
+            if (used + len > budget) break
+            stem.appendCodePoint(cp); used += len
+            i += Character.charCount(cp)
+        }
+        return stem.toString() + ext
     }
+
+    private fun utf8Len(s: String) = s.toByteArray(Charsets.UTF_8).size
 
     /** `type; a=b; c="d; e"` → {a: b, c: d; e}, names lowercased, quoted-pairs unescaped. */
     private fun parameters(header: String): Map<String, String> {
@@ -102,6 +126,7 @@ object DownloadPolicy {
                 bytes.write(c.code and 0xff); k++
             }
         }
-        return bytes.toString(Charsets.UTF_8)
+        // Not bytes.toString(Charset): that overload is API 33, and minSdk is 29.
+        return String(bytes.toByteArray(), Charsets.UTF_8)
     }
 }

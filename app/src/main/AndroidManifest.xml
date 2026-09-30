@@ -21,6 +21,18 @@
             </intent-filter>
         </activity>
 
+        <!-- WWT-238: opens downloaded attachments from the app's private cache;
+             not exported — viewers get per-file temporary read grants only. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.attachments"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/attachment_paths" />
+        </provider>
+
         <receiver
             android:name=".push.PushReceiver"
             android:exported="true">

@@ -43,6 +43,12 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest
 
+      # Lint's NewApi check is the only thing that catches a call to an API newer
+      # than minSdk: JVM unit tests run on a desktop JDK that has every method, and
+      # device runs use recent Android. Fails on errors only; warnings are advisory.
+      - name: Lint
+        run: ./gradlew :app:lintDebug
+
       - name: Assemble debug APK
         env:
           GIT_SHA: ${{ github.sha }}
