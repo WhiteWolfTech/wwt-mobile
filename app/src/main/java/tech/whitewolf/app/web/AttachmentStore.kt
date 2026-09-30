@@ -9,7 +9,7 @@ import java.io.File
  * up rather than accumulating. Everything goes on sign-out ([clear]); anything older
  * than a week goes at app start ([pruneOlderThan]); Android may also evict the cache
  * under storage pressure. A file leaves the app only through a one-off read grant
- * when the user opens it (see [openAttachment]).
+ * when the user opens it (see [AttachmentDownloads.open]).
  *
  * Plain java.io over [dir], so the rules are testable on the JVM.
  */

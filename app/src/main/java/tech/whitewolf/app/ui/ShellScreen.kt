@@ -182,9 +182,9 @@ fun ShellScreen(container: AppContainer) {
         // once a new session cookie is seeded, which is the security requirement this
         // call exists to satisfy (see AppContainer.scopes and SubAppScopes' own KDoc).
         container.scopes.discardAll()
-        // Downloaded attachments and the WebView's disk cache go with it (WWT-238);
-        // on this thread for the same reason — it briefly creates a WebView.
-        purgeSignedOutData(context)
+        // Downloaded attachments and the WebView's disk cache are purged by the
+        // LaunchedEffect(loggedIn) above, which signedOut() has just triggered — once,
+        // for this path and the background-401 path alike (WWT-238).
     }
 
     Scaffold(

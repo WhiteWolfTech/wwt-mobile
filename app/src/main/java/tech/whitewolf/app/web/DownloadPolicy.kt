@@ -30,19 +30,19 @@ object DownloadPolicy {
         return DownloadPlan(url, fileName(contentDisposition), mimeType?.takeIf { it.isNotBlank() })
     }
 
-    /**
-     * The file name from a Content-Disposition header, made safe to use as a path
-     * under Downloads. RFC 2231/5987 `filename*=` (which the server uses for
-     * non-ASCII names, via Go's mime.FormatMediaType) wins over plain `filename=`.
-     * The name comes from whoever sent the mail, so path separators and control
-     * characters are removed rather than trusted.
-     */
     private fun isExactlyHost(url: String, allowedHost: String): Boolean {
         val uri = try { URI(url) } catch (e: Exception) { return false }
         if (uri.scheme?.lowercase() != "https" || uri.rawUserInfo != null) return false
         return uri.host?.lowercase()?.trimEnd('.') == allowedHost.lowercase()
     }
 
+    /**
+     * The file name from a Content-Disposition header, made safe to use as a file
+     * name in the attachment store. RFC 2231/5987 `filename*=` (which the server uses for
+     * non-ASCII names, via Go's mime.FormatMediaType) wins over plain `filename=`.
+     * The name comes from whoever sent the mail, so path separators and control
+     * characters are removed rather than trusted.
+     */
     internal fun fileName(contentDisposition: String?): String {
         val params = contentDisposition?.let(::parameters).orEmpty()
         val raw = params["filename*"]?.let(::decodeExtValue) ?: params["filename"]
