@@ -217,7 +217,7 @@ git commit -m "feat(subapp): SubAppId value type and the SubApp/SubAppHost inter
 
 **Interfaces:**
 - Consumes: `SubAppId`, `SubApp` (Task 1).
-- Produces: `interface SubAppPush { val channelId: String; val channelName: String; val channelDescription: String; fun decode(body: ByteArray): WakePayload?; fun notify(context: Context, payload: WakePayload); fun tapUri(payload: WakePayload): Uri }`; `data class SubAppEntry(val ui: SubApp, val push: SubAppPush?)`; `class SubAppRegistry(entries: List<SubAppEntry>)` with `all(): List<SubAppEntry>`, `byId(id: SubAppId): SubAppEntry?`, `ids(): List<SubAppId>`.
+- Produces: `interface SubAppPush { val channelId: String; val channelName: String; val channelDescription: String; fun decode(body: ByteArray): WakePayload?; fun notify(context: Context, payload: WakePayload); fun tapTarget(payload: WakePayload): String; fun tapUri(payload: WakePayload): Uri = Uri.parse(tapTarget(payload)) }`; `data class SubAppEntry(val ui: SubApp, val push: SubAppPush?)`; `class SubAppRegistry(entries: List<SubAppEntry>)` with `all(): List<SubAppEntry>`, `byId(id: SubAppId): SubAppEntry?`, `ids(): List<SubAppId>`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -382,7 +382,9 @@ git commit -m "feat(subapp): SubAppPush facet, SubAppEntry, and an instance regi
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `interface WebViewHandle { fun canGoBack(): Boolean; fun goBack(); fun reload(); fun loadUrl(url: String); fun evaluateJavascript(js: String); fun onPause(); fun onResume(); fun destroy() }`; `class MailWebSession(val web: WebViewHandle)` with `pageLoaded`/`canGoBack`/`errored` as `MutableStateFlow<Boolean>`, `bind(listener: SessionListener)`, `unbind()`, `onAttached()`, `onDetached()`, and `interface SessionListener { fun onPageFinished(); fun onHistoryChanged(canGoBack: Boolean); fun onMainFrameError() }`.
+- Produces: `interface WebViewHandle { fun canGoBack(): Boolean; fun goBack(); fun reload(); fun loadUrl(url: String); fun evaluateJavascript(script: String); fun onPause(); fun onResume(); fun destroy() }`; `interface SessionListener { fun onPageFinished(); fun onHistoryChanged(canGoBack: Boolean); fun onMainFrameError() }`; `class MailWebSession(val web: WebViewHandle)` exposing `pageLoaded`/`canGoBack`/`errored` as read-only `StateFlow<Boolean>` (private mutable backing), the retained fields `var container: ViewGroup?`, `var seededToken: String?`, `var lastWakeSeen: Long`, and `bind(listener)`, `unbind()`, `onAttached()`, `onDetached()`, `notifyPageFinished()`, `notifyHistoryChanged()`, `notifyMainFrameError()`, `destroy()`.
+
+  The three retained fields and `destroy()` are consumed by Tasks 8, 9 and 19 — a `remember`-scoped equivalent would reload the SPA on every launcher round-trip, which is the defect this whole retention design exists to prevent.
 
 The `WebViewHandle` indirection is what makes this JVM-testable. Holding a raw `WebView`
 here would make every retention test instrumented-only, and retention has no existing
@@ -731,8 +733,10 @@ git commit -m "feat(subapp): per-sub-app retained scopes, discarded on sign-out"
 - Test: `app/src/test/java/tech/whitewolf/app/push/DeepLinkTest.kt`
 
 **Interfaces:**
-- Consumes: `SubAppId` (Task 1), `WakePayload` (Task 2).
-- Produces: `object DeepLink { const val SCHEME = "wwt"; fun build(payload: WakePayload): Uri; fun parse(uri: Uri?): WakePayload? }`.
+- Consumes: `SubAppId`, `WakePayload` (both Task 1).
+- Produces: `object DeepLink { const val SCHEME = "wwt"; fun buildString(payload: WakePayload): String; fun parseString(raw: String?): WakePayload?; fun build(payload: WakePayload): Uri; fun parse(uri: Uri?): WakePayload? }`.
+
+  The **String** forms are the primitives and the tested surface — `android.net.Uri` is stubbed under `isReturnDefaultValues`, so `Uri.parse` returns null in unit tests. Task 13 calls `buildString` directly.
 
 Encoded as intent **data**, not extras: extras do not participate in `PendingIntent`
 equality, so with request code `0` and `FLAG_UPDATE_CURRENT` two notifications would
@@ -869,7 +873,7 @@ git commit -m "feat(push): wwt://subapp deep-link URIs for notification targets"
 - Test: `app/src/test/java/tech/whitewolf/app/ui/RouteStateTest.kt`
 
 **Interfaces:**
-- Consumes: `SubAppId` (Task 1), `WakePayload` (Task 2), `DeepLink` (Task 5).
+- Consumes: `SubAppId`, `WakePayload` (both Task 1); `DeepLink` (Task 5).
 - Produces: `sealed interface ShellRoute { data object Launcher; data class Open(val id: SubAppId) }`; `class RouteState(known: (SubAppId) -> Boolean, lastUsed: SubAppId?, saved: SubAppId?)` with `route: StateFlow<ShellRoute>`, `pendingLink: StateFlow<WakePayload?>`, `open(id)`, `toLauncher()`, `offerLink(payload, signedIn)`, `onSignedIn()`, `consumeLink()`, `restoreKey: String?`.
 
 Pure state, no Android types, so every rule below is a JVM test. `ShellViewModel` (Task 9)
@@ -2036,7 +2040,7 @@ git commit -m "feat(push): process-scoped visible-route holder for wake decision
 - Test: `app/src/test/java/tech/whitewolf/app/subapp/mail/MailPushTest.kt`
 
 **Interfaces:**
-- Consumes: `SubAppPush`, `WakePayload`, `SubAppId` (Tasks 1-2); `DeepLink` (Task 5); `WakeBus`, `VisibleRoute`, `wakeAction` (Tasks 11-12).
+- Consumes: `SubAppId`, `WakePayload` (Task 1); `SubAppPush` (Task 2); `DeepLink` (Task 5); `WakeBus`, `VisibleRoute`, `wakeAction` (Tasks 11-12).
 - Produces: `class MailPush : SubAppPush`; `object Notifications { fun ensureChannel(context, id, name, description); fun post(context, channelId, notificationId, title, text, tapUri) }`.
 
 - [ ] **Step 1: Write the failing test**

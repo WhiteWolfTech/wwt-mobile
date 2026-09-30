@@ -43,12 +43,27 @@ for f in "$APP_APK" "$TEST_APK"; do
   [ -f "$f" ] || { echo "missing $f — run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest" >&2; exit 1; }
 done
 
+# BrowserStack returns an HTML error page (not JSON) when it is degraded or over
+# quota. Piping that straight into jq produces a cryptic "parse error" that looks
+# like a bug in this script, so check the body is JSON before parsing it.
+post_json() {
+    local label="$1"; shift
+    local body
+    body=$(curl -sS -K "$CURL_CFG" "$@") || { echo "$label: curl failed" >&2; return 1; }
+    if ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+        echo "$label: BrowserStack returned a non-JSON response (service degraded or over quota):" >&2
+        printf '%s\n' "$body" | head -3 >&2
+        return 1
+    fi
+    printf '%s' "$body"
+}
+
 echo "==> uploading app"
-APP_URL=$(curl -sS -K "$CURL_CFG" -X POST "$API/upload" -F "file=@$APP_APK" | jq -r '.app_url // empty')
+APP_URL=$(post_json "app upload" -X POST "$API/upload" -F "file=@$APP_APK" | jq -r '.app_url // empty') || exit 1
 [ -n "$APP_URL" ] || { echo "app upload failed" >&2; exit 1; }
 
 echo "==> uploading test suite"
-TEST_URL=$(curl -sS -K "$CURL_CFG" -X POST "$API/espresso/v2/test-suite" -F "file=@$TEST_APK" | jq -r '.test_suite_url // empty')
+TEST_URL=$(post_json "test-suite upload" -X POST "$API/espresso/v2/test-suite" -F "file=@$TEST_APK" | jq -r '.test_suite_url // empty') || exit 1
 [ -n "$TEST_URL" ] || { echo "test-suite upload failed" >&2; exit 1; }
 
 PAYLOAD=$(jq -n --arg app "$APP_URL" --arg ts "$TEST_URL" --arg dev "$DEVICE" --arg cls "$CLASS_FILTER" '
@@ -56,14 +71,14 @@ PAYLOAD=$(jq -n --arg app "$APP_URL" --arg ts "$TEST_URL" --arg dev "$DEVICE" --
   + (if $cls == "" then {} else {class: [$cls]} end)')
 
 echo "==> starting build on $DEVICE"
-BUILD_ID=$(curl -sS -K "$CURL_CFG" -X POST "$API/espresso/v2/build" \
-  -H "Content-Type: application/json" -d "$PAYLOAD" | jq -r '.build_id // empty')
+BUILD_ID=$(post_json "build start" -X POST "$API/espresso/v2/build" \
+  -H "Content-Type: application/json" -d "$PAYLOAD" | jq -r '.build_id // empty') || exit 1
 [ -n "$BUILD_ID" ] || { echo "build did not start" >&2; exit 1; }
 echo "    build $BUILD_ID"
 
 echo "==> waiting"
 for _ in $(seq 1 120); do
-  RESP=$(curl -sS -K "$CURL_CFG" "$API/espresso/v2/builds/$BUILD_ID")
+  RESP=$(post_json "poll" "$API/espresso/v2/builds/$BUILD_ID") || exit 1
   STATUS=$(echo "$RESP" | jq -r '.status // "unknown"')
   case "$STATUS" in
     running|queued) sleep 15 ;;
