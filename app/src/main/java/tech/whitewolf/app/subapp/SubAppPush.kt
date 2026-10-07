@@ -25,4 +25,17 @@ interface SubAppPush {
     /** The same target as a Uri. Default impl; android.net.Uri is stubbed in unit tests,
      *  so tests assert on [tapTarget] instead. */
     fun tapUri(payload: WakePayload): Uri = Uri.parse(tapTarget(payload))
+
+    /**
+     * True when [body] asks this sub-app to REMOVE its notification rather than post one
+     * (mail's `{"type":"clear"}`, sent once the mail it announced was dealt with on
+     * another client). Checked by PushReceiver before [decode]; a dismissal never bumps
+     * the WakeBus and never notifies. Defaults to false, so a sub-app with no notion of
+     * clearing is unaffected and every body still flows to [decode] as before.
+     */
+    fun dismisses(body: ByteArray): Boolean = false
+
+    /** Cancel this sub-app's notification(s). Owns its ids, as [notify] does. A no-op by
+     *  default, paired with the default [dismisses] that never asks for it. */
+    fun clear(context: Context) {}
 }

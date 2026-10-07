@@ -32,12 +32,22 @@ class MailPush(private val id: SubAppId) : SubAppPush {
     private val notificationId = 1
     private val json = Json { ignoreUnknownKeys = true }
 
-    override fun decode(body: ByteArray): WakePayload? = try {
-        val type = json.parseToJsonElement(body.decodeToString())
-            .jsonObject["type"]?.jsonPrimitive?.content
-        if (type == "new_mail") WakePayload(id, null) else null
-    } catch (e: Exception) {
-        null
+    override fun decode(body: ByteArray): WakePayload? =
+        if (typeOf(body) == "new_mail") WakePayload(id, null) else null
+
+    /**
+     * WWT-250: the server sends `{"type":"clear"}` once the latest mail it pushed about is
+     * no longer unread in the Inbox — read, archived or trashed on the web, another
+     * device, or by another delegate of a shared mailbox. Like `new_mail` it carries no
+     * message id or content. Deliberately NOT a [decode] result: decode is the notify
+     * path, and a clear that slipped through there would post "You have new mail".
+     */
+    override fun dismisses(body: ByteArray): Boolean = typeOf(body) == "clear"
+
+    /** Cancels the one collapsing mail notification: the same [notificationId] [notify]
+     *  posts under, so there is never a second id to forget. */
+    override fun clear(context: Context) {
+        Notifications.cancel(context, notificationId)
     }
 
     override fun notify(context: Context, payload: WakePayload) {
@@ -61,4 +71,16 @@ class MailPush(private val id: SubAppId) : SubAppPush {
     // target never carries one.
     override fun tapTarget(payload: WakePayload): String =
         DeepLink.buildString(WakePayload(payload.subAppId, null))
+
+    // The body's `type`, or null when it is not a JSON object with a primitive `type`.
+    // Shared by [decode] and [dismisses] so both read the wire format with the same
+    // leniency: unknown keys ignored, and garbage (not JSON, a non-object, a non-primitive
+    // `type`) is null rather than a throw — a newer server's payload must never crash an
+    // older shell.
+    private fun typeOf(body: ByteArray): String? = try {
+        json.parseToJsonElement(body.decodeToString())
+            .jsonObject["type"]?.jsonPrimitive?.content
+    } catch (e: Exception) {
+        null
+    }
 }

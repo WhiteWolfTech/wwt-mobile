@@ -4,7 +4,9 @@ import tech.whitewolf.app.subapp.SubAppId
 import tech.whitewolf.app.subapp.WakePayload
 import tech.whitewolf.app.push.DeepLink
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MailPushTest {
@@ -48,5 +50,31 @@ class MailPushTest {
         val otherId = SubAppId("otherid")
         val p = MailPush(SubAppId("mail"))
         assertEquals("wwt://subapp/$otherId", p.tapTarget(WakePayload(otherId)))
+    }
+
+    @Test fun aClearBodyDismisses() {
+        // WWT-250: the server sends exactly this once the latest mail it announced is no
+        // longer unread in the Inbox (read, archived or trashed elsewhere). Content-free,
+        // like new_mail.
+        assertTrue(push.dismisses("""{"type":"clear"}""".toByteArray()))
+    }
+
+    @Test fun onlyAClearBodyDismisses() {
+        // new_mail must never cancel the notification it is about to post, and garbage
+        // must fall through as quietly as it does in decode(): a newer server's payload
+        // never crashes, or silently clears, an older shell.
+        assertFalse(push.dismisses("""{"type":"new_mail"}""".toByteArray()))
+        assertFalse(push.dismisses("""{"type":"something_else"}""".toByteArray()))
+        assertFalse(push.dismisses("""{"type":["clear"]}""".toByteArray()))
+        assertFalse(push.dismisses("not json".toByteArray()))
+        assertFalse(push.dismisses("[]".toByteArray()))
+        assertFalse(push.dismisses(ByteArray(0)))
+    }
+
+    @Test fun aClearBodyNeverDecodesToAWake() {
+        // decode() is the path that notifies. If it ever accepted "clear", a clear push
+        // would POST a "You have new mail" notification instead of removing one — the
+        // exact opposite of its purpose. Old builds rely on this null to ignore it.
+        assertNull(push.decode("""{"type":"clear"}""".toByteArray()))
     }
 }
