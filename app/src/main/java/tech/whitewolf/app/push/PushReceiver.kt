@@ -14,6 +14,8 @@ import tech.whitewolf.app.subapp.SubAppId
  * onMessage is registry-driven: it routes by `instance` alone and never learns any
  * sub-app's payload shape. Every wake-up bumps the target sub-app's WakeBus tick; a
  * notification is posted only when that sub-app is not what's currently on screen.
+ * A body the sub-app reports as a dismissal (mail's `clear`, WWT-250) cancels its
+ * notification instead, without bumping the tick.
  * Unknown instance, no push behaviour registered, or an undecodable payload → return
  * quietly. A newer build's notification must never crash an older shell.
  */
@@ -46,7 +48,18 @@ class PushReceiver : MessagingReceiver() {
         val app = WwtApp.from(context)
         val id = SubAppId.parse(instance) ?: return
         val entry = app.container.registry.byId(id) ?: return   // unknown -> ignore, never crash
-        val payload = entry.push?.decode(message) ?: return
+        // A local val, not entry.push throughout: smart-casting a property read across
+        // the calls below is not guaranteed safe, and one read keeps the push we decide
+        // with the same push we act on.
+        val push = entry.push ?: return
+        // WWT-250: a dismissal removes the notification and stops there. No WakeBus
+        // signal — the SPA's own 15s poll already catches the read, and refreshing the
+        // WebView on every read elsewhere would be wasteful — and no notify, ever.
+        if (push.dismisses(message)) {
+            push.clear(app)
+            return
+        }
+        val payload = push.decode(message) ?: return
         // Always bump the tick, unconditionally and before the notify branch below: both
         // wake arms (silent refresh and notify-then-refresh-on-open) must advance it, or a
         // user switching to the target from the launcher reads stale content — there is no
@@ -54,7 +67,7 @@ class PushReceiver : MessagingReceiver() {
         app.wakeBus.signal(id)
         val visible = app.visibleRoute.isVisible(id)
         if (wakeAction(app.isForeground, visible) == WakeAction.Background) {
-            entry.push.notify(app, payload)
+            push.notify(app, payload)
         }
     }
 

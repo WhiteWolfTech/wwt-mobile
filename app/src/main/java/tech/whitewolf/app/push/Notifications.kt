@@ -71,4 +71,13 @@ object Notifications {
             .build()
         NotificationManagerCompat.from(context).notify(notificationId, notification)
     }
+
+    /**
+     * Remove a posted notification by id (WWT-250: mail's server-sent `clear`). Needs no
+     * permission check — cancelling one that was never posted, or was already swiped
+     * away, is a harmless no-op.
+     */
+    fun cancel(context: Context, notificationId: Int) {
+        NotificationManagerCompat.from(context).cancel(notificationId)
+    }
 }
