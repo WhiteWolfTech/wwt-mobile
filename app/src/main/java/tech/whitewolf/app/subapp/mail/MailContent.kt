@@ -5,9 +5,16 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -58,6 +65,10 @@ private const val REFRESH_SPINNER_MS = 800L
 // Offline-aware auto-retry cadence (docs/superpowers/specs/2026-07-07-offline-error-
 // handling-design.md): how often to retry while online and the error screen is up.
 private const val ERROR_RETRY_MS = 30_000L
+
+// Leak guard for the throwaway popup WebView (see popupClient): a popup that never
+// navigates — window.open() with no URL — is destroyed after this long regardless.
+private const val POPUP_LEAK_GUARD_MS = 10_000L
 
 /**
  * Whether mail's own back handler should be armed. History back is suppressed while the
@@ -291,22 +302,22 @@ private fun buildContainer(
             AttachmentDownloads.start(ctx, plan, userAgent)
         }
 
+        // Links inside an email (WWT-219). The SPA renders the message body in a sandboxed
+        // iframe (allow-same-origin allow-popups allow-popups-to-escape-sandbox, no
+        // allow-top-navigation) and the server gives every absolute link target="_blank".
+        // With multiple windows unsupported, Chromium retargets a _blank click at the top
+        // frame — which the sandbox forbids navigating — so the click was silently dropped
+        // and shouldOverrideUrlLoading below never fired: tapping a link did nothing.
+        // Supporting multiple windows turns that click into onCreateWindow instead, where
+        // popupClient routes it exactly like any other link (verified on Pixel 8/A14,
+        // Galaxy S25/A15 and S20/A10).
+        settings.setSupportMultipleWindows(true)
+        webChromeClient = popupClient(ctx, allowedHost)
+
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest,
-            ): Boolean {
-                val reqUrl = request.url.toString()
-                return if (NavPolicy.isInApp(reqUrl, allowedHost)) {
-                    false // let the WebView load it
-                } else {
-                    try {
-                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(reqUrl)))
-                    } catch (e: ActivityNotFoundException) {
-                        Log.w("MailContent", "No app to open external link: $reqUrl")
-                    }
-                    true // handled externally
-                }
-            }
+            ): Boolean = openExternally(ctx, request.url.toString(), allowedHost)
 
             override fun onReceivedError(
                 view: WebView, request: WebResourceRequest, error: WebResourceError,
@@ -374,6 +385,105 @@ private fun buildContainer(
                 wv.reload()
             }
         }
+    }
+}
+
+/**
+ * The single link-routing decision, shared by the main WebViewClient and the popup path
+ * (WWT-219) so the two cannot drift. Returns false for an in-app URL (NavPolicy) — the
+ * caller lets the WebView load it — and true when the URL was handed to [launch] (an
+ * ACTION_VIEW in production). A missing handler is logged and still counts as handled:
+ * the WebView must not fall back to loading a foreign page itself.
+ *
+ * [launch] is a parameter rather than a Context so this stays JVM-testable.
+ */
+internal fun openExternally(url: String, allowedHost: String, launch: (String) -> Unit): Boolean {
+    if (NavPolicy.isInApp(url, allowedHost)) return false // let the WebView load it
+    try {
+        launch(url)
+    } catch (e: ActivityNotFoundException) {
+        Log.w("MailContent", "No app to open external link: $url")
+    }
+    return true // handled externally
+}
+
+private fun openExternally(ctx: Context, url: String, allowedHost: String): Boolean =
+    openExternally(url, allowedHost) { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
+
+/**
+ * Mail's WebChromeClient (WWT-219). Until WWT-219 the WebView had NO WebChromeClient, and
+ * this client is deliberately shaped to change nothing about that except popups:
+ *
+ * - onCreateWindow: target="_blank" / window.open land here once multiple windows are
+ *   supported (see buildContainer). A throwaway, never-attached WebView receives the
+ *   popup; its first navigation is routed through [openExternally] like any other link
+ *   (an in-app URL loads in the main WebView instead) and the throwaway is destroyed.
+ *   Only user gestures are honoured — script-opened popups are refused, as before.
+ * - onJsAlert/onJsConfirm/onJsPrompt/onJsBeforeUnload: with no client at all, WebView
+ *   cancels every JS dialog (and beforeunload = stay). A client that does NOT override
+ *   these makes WebView show system dialogs instead, so they are required, not optional:
+ *   the SPA is deliberately native-dialog-free and must stay that way.
+ * - Nothing else is overridden. In particular onShowCustomView/onHideCustomView must stay
+ *   undeclared so fullscreen, the file chooser, geolocation and permission requests
+ *   behave exactly as they did with no client.
+ */
+private fun popupClient(ctx: Context, allowedHost: String) = object : WebChromeClient() {
+    override fun onCreateWindow(
+        view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message,
+    ): Boolean {
+        if (!isUserGesture) return false
+        val temp = WebView(view.context)
+        // temp is never attached to a window, so temp.post{} would NEVER run (View.post
+        // queues until attach) — that leaked every popup in testing. Destroy through the
+        // main looper instead, outside the WebViewClient callback. Idempotent: routing,
+        // a renderer crash and the leak guard can each ask.
+        val ui = Handler(Looper.getMainLooper())
+        var destroyed = false
+        fun destroyTemp() {
+            if (destroyed) return
+            destroyed = true
+            ui.post { temp.destroy() }
+        }
+        temp.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                v: WebView, request: WebResourceRequest,
+            ): Boolean {
+                val url = request.url.toString()
+                if (!openExternally(ctx, url, allowedHost)) view.loadUrl(url)
+                destroyTemp()
+                return true
+            }
+
+            // A throwaway popup's renderer dying must not take the app down (the default
+            // returns false, which makes WebView kill the host process).
+            override fun onRenderProcessGone(v: WebView, detail: RenderProcessGoneDetail): Boolean {
+                destroyTemp()
+                return true
+            }
+        }
+        ui.postDelayed({ destroyTemp() }, POPUP_LEAK_GUARD_MS)
+        (resultMsg.obj as WebView.WebViewTransport).webView = temp
+        resultMsg.sendToTarget()
+        return true
+    }
+
+    override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
+        result.cancel(); return true
+    }
+
+    override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean {
+        result.cancel(); return true
+    }
+
+    override fun onJsPrompt(
+        view: WebView, url: String, message: String, defaultValue: String?, result: JsPromptResult,
+    ): Boolean {
+        result.cancel(); return true
+    }
+
+    // cancel() = stay on the page, matching the no-client default.
+    override fun onJsBeforeUnload(view: WebView, url: String, message: String, result: JsResult): Boolean {
+        result.cancel(); return true
     }
 }
 
