@@ -65,7 +65,9 @@ object DeepLink {
         // After the slash, remainder must be non-empty and contain no further slashes
         val itemPart = rest.substring(slash + 1)
         if (itemPart.isEmpty() || itemPart.indexOf('/') >= 0) return null
-        val item = URLDecoder.decode(itemPart, "UTF-8")
+        // MainActivity is exported, so a malformed escape (`%zz`) from another app must be an
+        // invalid link, not an IllegalArgumentException out of onCreate (WWT-254).
+        val item = runCatching { URLDecoder.decode(itemPart, "UTF-8") }.getOrNull() ?: return null
         return WakePayload(id, item, compose)
     }
 

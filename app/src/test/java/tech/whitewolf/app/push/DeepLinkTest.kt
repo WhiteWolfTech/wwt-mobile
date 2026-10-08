@@ -118,4 +118,8 @@ class DeepLinkTest {
     @Test fun aMalformedComposeIsDroppedNotThrown() {
         assertEquals(WakePayload(mail), DeepLink.parseString("wwt://subapp/mail?compose=mailto%3A%zz"))
     }
+
+    @Test fun aMalformedItemIdIsRejectedNotThrown() {
+        assertNull(DeepLink.parseString("wwt://subapp/mail/%zz"))
+    }
 }
