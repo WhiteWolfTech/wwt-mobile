@@ -8,8 +8,17 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * What arrived on the wire. Deliberately thin: a target and an optional item id. Defined
  * here rather than beside SubAppPush because SubAppHost carries it too.
+ *
+ * [compose] (WWT-253) is a `mailto:` link to open Compose with — set only by
+ * MailtoActivity, never by a notification, so a notification's payload (and the data
+ * URI its PendingIntent is compared by) is unchanged. It is opaque to the shell: mail
+ * hands it to the SPA, which does the parsing.
  */
-data class WakePayload(val subAppId: SubAppId, val itemId: String? = null)
+data class WakePayload(
+    val subAppId: SubAppId,
+    val itemId: String? = null,
+    val compose: String? = null,
+)
 
 /**
  * What the shell can say to a sub-app while it is on screen. Three events, settled

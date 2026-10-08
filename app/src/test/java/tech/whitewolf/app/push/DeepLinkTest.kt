@@ -1,5 +1,6 @@
 package tech.whitewolf.app.push
 
+import tech.whitewolf.app.mailto.MailtoIntent
 import tech.whitewolf.app.subapp.SubAppId
 import tech.whitewolf.app.subapp.WakePayload
 import org.junit.Assert.assertEquals
@@ -60,5 +61,65 @@ class DeepLinkTest {
             WakePayload(SubAppId("mail")),
             DeepLink.parseString(DeepLink.buildString(WakePayload(SubAppId("mail"), ""))),
         )
+    }
+
+    // ---- compose (WWT-253): a mailto: link handed over by MailtoActivity ----
+
+    private val mail = SubAppId("mail")
+
+    // Notification PendingIntent equality compares the data URI, so a compose-less
+    // payload must keep building exactly what every notification built before.
+    @Test fun aComposeLessPayloadBuildsByteIdenticallyToBefore() {
+        assertEquals("wwt://subapp/mail", DeepLink.buildString(WakePayload(mail)))
+        assertEquals("wwt://subapp/mail", DeepLink.buildString(WakePayload(mail, null, null)))
+        assertEquals("wwt://subapp/video/abc123", DeepLink.buildString(WakePayload(SubAppId("video"), "abc123", null)))
+    }
+
+    @Test fun composeIsAQueryParamOnTheTarget() {
+        assertEquals(
+            "wwt://subapp/mail?compose=mailto%3Aa%40b.com",
+            DeepLink.buildString(WakePayload(mail, compose = "mailto:a@b.com")),
+        )
+    }
+
+    @Test fun composeRoundTripsAwkwardCharacters() {
+        val m = "mailto:a@b.com?subject=Caf\u00e9 & co=1%25+x&body=line1%0D%0Aline2 \u2603"
+        val p = WakePayload(mail, compose = m)
+        assertEquals(p, DeepLink.parseString(DeepLink.buildString(p)))
+        val withItem = WakePayload(SubAppId("video"), "a b/c", m)
+        assertEquals(withItem, DeepLink.parseString(DeepLink.buildString(withItem)))
+    }
+
+    @Test fun oldFormsStillParseWithNoCompose() {
+        assertEquals(WakePayload(mail), DeepLink.parseString("wwt://subapp/mail"))
+        assertEquals(WakePayload(SubAppId("video"), "abc123"), DeepLink.parseString("wwt://subapp/video/abc123"))
+    }
+
+    @Test fun otherQueryParamsAreIgnored() {
+        assertEquals(WakePayload(mail), DeepLink.parseString("wwt://subapp/mail?x=1"))
+        assertEquals(
+            WakePayload(mail, compose = "mailto:a@b.com"),
+            DeepLink.parseString("wwt://subapp/mail?x=1&compose=mailto%3Aa%40b.com"),
+        )
+    }
+
+    // MainActivity is exported, so these are the checks a direct caller cannot skip by
+    // going around MailtoActivity. A bad compose is dropped; the rest of the link stands.
+    @Test fun anOversizeComposeIsDropped() {
+        val big = "mailto:a@b.com?body=" + "x".repeat(MailtoIntent.MAX_LEN)
+        assertEquals(WakePayload(mail), DeepLink.parseString(DeepLink.buildString(WakePayload(mail, compose = big))))
+    }
+
+    @Test fun aNonMailtoComposeIsDropped() {
+        assertEquals(WakePayload(mail), DeepLink.parseString("wwt://subapp/mail?compose=javascript%3Aalert(1)"))
+        assertEquals(WakePayload(mail), DeepLink.parseString("wwt://subapp/mail?compose="))
+    }
+
+    @Test fun aMalformedComposeIsDroppedNotThrown() {
+        assertEquals(WakePayload(mail), DeepLink.parseString("wwt://subapp/mail?compose=mailto%3A%zz"))
+    }
+
+    @Test fun aMalformedItemIdIsRejectedNotThrown() {
+        assertNull(DeepLink.parseString("wwt://subapp/mail/%zz"))
     }
 }

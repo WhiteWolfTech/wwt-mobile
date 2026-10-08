@@ -49,6 +49,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import java.net.URI
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonPrimitive
 import tech.whitewolf.app.auth.sessionCookieLine
 import tech.whitewolf.app.subapp.SubAppHost
 import tech.whitewolf.app.web.AttachmentDownloads
@@ -57,6 +58,27 @@ import tech.whitewolf.app.web.NavPolicy
 import tech.whitewolf.app.web.ShellBridge
 
 private const val WAKE_JS = "window.wwtWake && window.wwtWake()"
+
+/**
+ * The script that hands a mailto: link to the SPA (WWT-253). If the SPA has installed its
+ * hook it is called now; otherwise — a cold start, where onPageFinished can beat React's
+ * first effect — the link is parked in `window.wwtPendingCompose`, which the hook drains
+ * once on install (web/src/composehook.ts). The SPA parses the link; this only delivers it.
+ *
+ * The link is caller-controlled (any app can send a mailto:), so it must only ever be one
+ * string literal. It is quoted ONCE and spliced in by a template, so the quoted text is
+ * never re-scanned for a placeholder. JSON string syntax is a subset of JS's; kotlinx's
+ * encoder (a real class in JVM tests, unlike org.json's Android stub) escapes quotes,
+ * backslashes and control characters, and U+2028/U+2029 are escaped on top — they are
+ * legal raw in JSON but ended a JS string literal before ES2019. `</script>` needs no
+ * escaping: this is evaluated as script, never parsed as HTML.
+ */
+internal fun composeJs(mailto: String): String {
+    val q = JsonPrimitive(mailto).toString()
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    return "(window.wwtCompose ? window.wwtCompose($q) : (window.wwtPendingCompose = $q))"
+}
 
 // Spinner runtime for the wake-refresh path: the SPA gives no completion
 // signal, and its refresh fetch is fast — a fixed short spin reads as "done".
@@ -138,6 +160,20 @@ fun MailContent(
             session.lastWakeSeen = tick
             session.evaluateJavascript(WAKE_JS)
         }
+    }
+
+    // A mailto: link from another app (WWT-253, via MailtoActivity) opens Compose. Only a
+    // link that CARRIES compose is acted on and consumed: a notification tap's link (no
+    // compose) is left exactly as before — nothing in mail has ever consumed it, and this
+    // must not start to. No seen-counter is needed, unlike wake: onDeepLinkHandled()
+    // nulls the pending link, so neither a recomposition nor re-entering mail can replay
+    // it. Held until the page is up so the SPA (or its pending slot) is there to take it.
+    val link by host.deepLink.collectAsState()
+    LaunchedEffect(link, pageLoaded, errored) {
+        val mailto = link?.compose ?: return@LaunchedEffect
+        if (!pageLoaded || errored) return@LaunchedEffect
+        session.evaluateJavascript(composeJs(mailto))
+        host.onDeepLinkHandled()
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
