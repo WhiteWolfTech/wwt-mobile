@@ -21,6 +21,24 @@
             </intent-filter>
         </activity>
 
+        <!-- WWT-253: mailto: links from other apps. A trampoline, not filters on MainActivity:
+             see MailtoActivity for why (browser CLEAR_TOP churn / second MainActivity stealing the WebView). -->
+        <activity
+            android:name=".MailtoActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mailto" />
+            </intent-filter>
+        </activity>
+
         <!-- WWT-238: opens downloaded attachments from the app's private cache;
              not exported — viewers get per-file temporary read grants only. -->
         <provider
